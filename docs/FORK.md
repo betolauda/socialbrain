@@ -34,7 +34,7 @@ land:
 |---|---|---|
 | 0 | docs, `pyproject.toml`, `.github/workflows/quality.yml` | branding + a pre-existing CI reproducibility bug fix, not counted |
 | 1 | `models.py` (+35/-4), `cli.py` (+9/-2 incl. import), `generate.py` (+1/-1) | **~39 net** |
-| 2 | `config.py`, `cli.py` | _pending_ |
+| 2 | `config.py` (+72/-6), `cli.py` (+6/-3) | **~71 net** (most of it docstrings/validation on new, additive fields — no existing field or behavior changed) |
 | 3 | `generate.py`, `rubrics.py` + 3 rubric `.md` | _pending_ |
 | 7 | `media.py`, `fetch.py` | _pending_ |
 | 8 | `dashboard.py` + `resources/dashboard.template.html` | _pending, deliberately last_ |

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from xbrain.config import load_config
+from xbrain.config import load_config, require_x_handle
 
 
 def _write_repo(root: Path, handle: str = "vgonpa") -> None:
@@ -277,3 +277,130 @@ def test_load_config_round_trips_describe_overrides(tmp_path: Path):
     cfg = load_config(tmp_path)
     assert cfg.describe_model == "claude-opus-4-1"
     assert cfg.describe_version == "v3"
+
+
+# ------------------------------------------------------- fork: [x] optional
+
+
+def test_load_config_without_an_x_section_at_all(tmp_path: Path):
+    """Fork addition: a LinkedIn-only config need not set an X handle."""
+    (tmp_path / "config.toml").write_text(
+        "[paths]\n"
+        'vault = "/tmp/vault"\n'
+        'output_subdir = "learnings/x-knowledge"\n'
+        'data_dir = "data"\n',
+        encoding="utf-8",
+    )
+    cfg = load_config(tmp_path)
+    assert cfg.x_handle == ""
+
+
+def test_require_x_handle_raises_for_an_empty_handle(tmp_path: Path):
+    (tmp_path / "config.toml").write_text(
+        "[paths]\n"
+        'vault = "/tmp/vault"\n'
+        'output_subdir = "learnings/x-knowledge"\n'
+        'data_dir = "data"\n',
+        encoding="utf-8",
+    )
+    cfg = load_config(tmp_path)
+    with pytest.raises(ValueError, match="required for X commands"):
+        require_x_handle(cfg)
+
+
+def test_require_x_handle_returns_the_handle_when_set(tmp_path: Path):
+    _write_repo(tmp_path, handle="vgonpa")
+    cfg = load_config(tmp_path)
+    assert require_x_handle(cfg) == "vgonpa"
+
+
+# ------------------------------------------------------------- fork: [linkedin]
+
+
+def test_load_config_linkedin_defaults(tmp_path: Path):
+    _write_repo(tmp_path)
+    cfg = load_config(tmp_path)
+    assert cfg.linkedin_max_per_run == 25
+    assert cfg.linkedin_min_delay_s == 45.0
+    assert cfg.linkedin_max_delay_s == 120.0
+
+
+def test_load_config_linkedin_overrides(tmp_path: Path):
+    (tmp_path / "config.toml").write_text(
+        "[paths]\n"
+        'vault = "/tmp/vault"\n'
+        'output_subdir = "learnings/x-knowledge"\n'
+        'data_dir = "data"\n'
+        "[linkedin]\n"
+        "max_per_run = 10\n"
+        "min_delay_s = 60.0\n"
+        "max_delay_s = 90.0\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(tmp_path)
+    assert cfg.linkedin_max_per_run == 10
+    assert cfg.linkedin_min_delay_s == 60.0
+    assert cfg.linkedin_max_delay_s == 90.0
+
+
+def test_load_config_rejects_linkedin_max_per_run_over_the_ceiling(tmp_path: Path):
+    """The 100 ceiling is a guardrail, not a suggestion — see docs/FORK.md."""
+    (tmp_path / "config.toml").write_text(
+        "[paths]\n"
+        'vault = "/tmp/vault"\n'
+        'output_subdir = "learnings/x-knowledge"\n'
+        'data_dir = "data"\n'
+        "[linkedin]\n"
+        "max_per_run = 500\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="max_per_run must be between 1 and 100"):
+        load_config(tmp_path)
+
+
+def test_load_config_rejects_linkedin_min_delay_below_the_floor(tmp_path: Path):
+    (tmp_path / "config.toml").write_text(
+        "[paths]\n"
+        'vault = "/tmp/vault"\n'
+        'output_subdir = "learnings/x-knowledge"\n'
+        'data_dir = "data"\n'
+        "[linkedin]\n"
+        "min_delay_s = 5.0\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="20 <= min_delay_s <= max_delay_s"):
+        load_config(tmp_path)
+
+
+def test_load_config_rejects_linkedin_max_delay_below_min_delay(tmp_path: Path):
+    (tmp_path / "config.toml").write_text(
+        "[paths]\n"
+        'vault = "/tmp/vault"\n'
+        'output_subdir = "learnings/x-knowledge"\n'
+        'data_dir = "data"\n'
+        "[linkedin]\n"
+        "min_delay_s = 100.0\n"
+        "max_delay_s = 50.0\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="20 <= min_delay_s <= max_delay_s"):
+        load_config(tmp_path)
+
+
+# --------------------------------------------------- fork: per-platform auth
+
+
+def test_storage_state_for_x_matches_the_original_property(tmp_path: Path):
+    """Pins the invariant: `storage_state_path` must keep resolving to
+    exactly the pre-fork path, byte-identical, for every X call site."""
+    _write_repo(tmp_path)
+    cfg = load_config(tmp_path)
+    assert cfg.storage_state_for("x") == cfg.storage_state_path
+    assert cfg.storage_state_path == tmp_path / "auth" / "storage_state.json"
+
+
+def test_storage_state_for_linkedin_uses_a_separate_file(tmp_path: Path):
+    _write_repo(tmp_path)
+    cfg = load_config(tmp_path)
+    assert cfg.storage_state_for("linkedin") == tmp_path / "auth" / "linkedin_storage_state.json"
+    assert cfg.storage_state_for("linkedin") != cfg.storage_state_path

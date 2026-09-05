@@ -7,8 +7,20 @@ output_subdir = "learnings/x-knowledge"
 data_dir = "data"
 
 [x]
+# OPTIONAL as of the socialbrain fork — omit this whole section entirely if
+# you only use LinkedIn (`socialbrain-li`). If present, `handle` must be set.
 # Your X handle, without the @.
 handle = "your_handle"
+
+[linkedin]
+# OPTIONAL — only needed for `socialbrain-li hydrate`. All fields have safe
+# defaults; uncomment to change them. See docs/FORK.md for why these are
+# guardrails, not suggestions: LinkedIn's User Agreement prohibits browser
+# automation outright, and the hydrator is deliberately low-volume and
+# slow-paced to minimize (never eliminate) account risk.
+# max_per_run = 25          # hard ceiling: 100
+# min_delay_s = 45.0        # hard floor: 20.0
+# max_delay_s = 120.0
 
 [enrich]
 # Executor that produces the LLM judgment:
