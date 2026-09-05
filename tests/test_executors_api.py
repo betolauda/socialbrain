@@ -50,6 +50,38 @@ def test_api_executor_substitutes_language_in_system_prompt():
     assert "**Language:** Spanish" in system
 
 
+def test_api_executor_substitutes_platform_in_system_prompt():
+    """Fork addition: same regression guard, for {platform}. All items in
+    this batch are source="bookmark", so the corpus-wide label is "X"."""
+    payload = {"summary": "r", "primary_topic": "misc", "topics": ["misc"]}
+    client = FakeAnthropic([payload])
+    ApiExecutor(model="m", output_language="English", client=client).enrich_items(
+        [_item("1")], VOCAB
+    )
+    system = client.messages.calls[0]["system"]
+    assert "{platform}" not in system
+    assert "for one X post" in system
+
+
+def test_api_executor_uses_mixed_platform_label_for_a_linkedin_and_x_batch():
+    payload = {"summary": "r", "primary_topic": "misc", "topics": ["misc"]}
+    client = FakeAnthropic([payload, payload])
+    linkedin_item = Item(
+        id="li-2",
+        source="li_saved",
+        url="https://www.linkedin.com/feed/update/urn:li:activity:2/",
+        author=Author(handle="jane", name="Jane"),
+        text="a linkedin post",
+        created_at=datetime(2026, 5, 1, tzinfo=timezone.utc),
+        captured_at=datetime(2026, 5, 16, tzinfo=timezone.utc),
+    )
+    ApiExecutor(model="m", output_language="English", client=client).enrich_items(
+        [_item("1"), linkedin_item], VOCAB
+    )
+    system = client.messages.calls[0]["system"]
+    assert "for one X and LinkedIn post" in system
+
+
 def test_api_executor_sends_the_configured_model():
     client = FakeAnthropic([{"summary": "r", "primary_topic": "misc", "topics": ["misc"]}])
     ApiExecutor(model="claude-sonnet-4-6", output_language="English", client=client).enrich_items(

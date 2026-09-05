@@ -14,6 +14,7 @@ import sys
 from xbrain.executors.base import EnrichmentJudgment
 from xbrain.llm_json import json_from_response
 from xbrain.models import ContentSourceSuccess, Item, MediaPhotoDescribed, Topic
+from xbrain.platforms import corpus_platform_label
 from xbrain.rubrics import (
     ARTICLE_CHAR_LIMIT,
     TRANSCRIPT_CHAR_LIMIT,
@@ -48,16 +49,18 @@ def _vocab_block(vocab: list[Topic]) -> str:
     return "\n".join(f"- {t.slug}: {t.description}" for t in vocab)
 
 
-def _system_prompt(language: str) -> str:
+def _system_prompt(language: str, platform: str) -> str:
     """The rubrics are the system prompt — the declarative source of truth.
 
-    `language` substitutes the `{language}` placeholder in `rubric-summary.md`.
-    `rubric-topics.md` has no placeholder; passed for consistency.
+    `language` substitutes `{language}` in `rubric-summary.md`. `platform`
+    (fork addition) substitutes `{platform}` in both rubrics — the
+    corpus-wide label (e.g. ``"X"``, ``"X and LinkedIn"``) for the batch of
+    items this one system prompt covers; see `corpus_platform_label`.
     """
     return (
-        load_rubric("summary", language=language)
+        load_rubric("summary", language=language, platform=platform)
         + "\n\n---\n\n"
-        + load_rubric("topics", language=language)
+        + load_rubric("topics", language=language, platform=platform)
         + "\n\n---\n\n"
         "Respond with a single JSON object and nothing else:\n"
         '{"summary": "...", "primary_topic": "<slug>", '
@@ -183,7 +186,7 @@ class ApiExecutor:
         self._output_language = output_language
 
     def enrich_items(self, items: list[Item], vocab: list[Topic]) -> list[EnrichmentJudgment]:
-        system = _system_prompt(self._output_language)
+        system = _system_prompt(self._output_language, corpus_platform_label(items))
         recoverable = _recoverable_errors()
         results: list[EnrichmentJudgment] = []
         failures = 0

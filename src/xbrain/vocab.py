@@ -13,6 +13,7 @@ from pathlib import Path
 
 from xbrain.llm_json import json_from_response
 from xbrain.models import Item, Topic
+from xbrain.platforms import corpus_platform_label
 from xbrain.rubrics import load_rubric
 
 _MAP_MAX_TOKENS = 1000
@@ -47,8 +48,8 @@ def induce_vocab(
 
         client = Anthropic()
 
-    system = load_rubric("vocab", language=output_language)
     items = list(store.values())
+    system = load_rubric("vocab", language=output_language, platform=corpus_platform_label(items))
 
     # --- Map: each chunk proposes candidate topics ---
     candidates: list[dict] = []
@@ -104,7 +105,9 @@ def export_vocab_worksheet(
             "objects {slug, description} — `slug` is kebab-case ([a-z0-9-]). "
             "Then run: xbrain vocab --apply <this file>."
         ),
-        "rubric": load_rubric("vocab", language=output_language),
+        "rubric": load_rubric(
+            "vocab", language=output_language, platform=corpus_platform_label(store.values())
+        ),
         "corpus": [item.text for item in store.values()],
         "topics": [],
     }

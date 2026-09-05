@@ -31,6 +31,8 @@ from xbrain.models import (
     VideoFrame,
 )
 from xbrain.notes_io import DEFAULT_TAIL, note_filename, slugify, title_of, user_tail, wrap
+from xbrain.platform_strings import PlatformStrings, X_DEFAULT, platform_strings_for
+from xbrain.platforms import PLATFORMS, PlatformName, platform_for_source
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +111,9 @@ def generate(
             f"Unsupported topic_style: {topic_style!r}. Supported: {SUPPORTED_TOPIC_STYLES}"
         )
     strings = strings_for(output_language)
+    # One PlatformStrings per platform, resolved once — cheap even though
+    # most stores are single-platform (see xbrain.platform_strings).
+    platform_strings = {name: platform_strings_for(name, output_language) for name in PLATFORMS}
     items = sorted(store.values(), key=lambda i: i.created_at, reverse=True)
     items_dir = output_dir / "items"
     items_dir.mkdir(parents=True, exist_ok=True)
@@ -120,7 +125,7 @@ def generate(
     # local file from Obsidian; it self-heals on the next `generate` per machine.
     dashboard_href = (output_dir / "dashboard.html").resolve().as_uri()
     (output_dir / "_index.md").write_text(
-        _render_index(items, strings, dashboard_href), encoding="utf-8"
+        _render_index(items, strings, dashboard_href, platform_strings), encoding="utf-8"
     )
     (output_dir / "log.md").write_text(_render_log(items), encoding="utf-8")
     for item in items:
@@ -130,7 +135,8 @@ def generate(
                 _mirror_item_media(item, media_root, vault_media_dir)
                 _mirror_item_frames(item, media_root, vault_media_dir)
                 _mirror_item_article_images(item, media_root, vault_media_dir)
-            _write_note(items_dir, item, strings, topic_style)
+            item_platform = platform_strings[platform_for_source(item.source).name]
+            _write_note(items_dir, item, strings, topic_style, item_platform)
     try:
         _write_dashboard(items, output_dir, items_dir, topic_pages or {}, media_root)
     except Exception:  # noqa: BLE001 - the dashboard is a best-effort secondary artifact
@@ -184,7 +190,13 @@ def _in_range(item: Item, since: datetime | None, until: datetime | None) -> boo
     return True
 
 
-def _write_note(items_dir: Path, item: Item, strings: Strings, topic_style: str) -> None:
+def _write_note(
+    items_dir: Path,
+    item: Item,
+    strings: Strings,
+    topic_style: str,
+    platform: PlatformStrings = X_DEFAULT,
+) -> None:
     """Write an item's note, replacing only the generated region.
 
     The filename ends with the item's globally unique ``id``. That makes
@@ -194,7 +206,7 @@ def _write_note(items_dir: Path, item: Item, strings: Strings, topic_style: str)
     orphaned.
     """
     path = items_dir / note_filename(item)
-    block = wrap(_render_note(item, strings, topic_style))
+    block = wrap(_render_note(item, strings, topic_style, platform))
     source = path if path.exists() else _stale_note(items_dir, item, path)
     if source is not None:
         tail = user_tail(source.read_text(encoding="utf-8"), DEFAULT_TAIL)
@@ -560,33 +572,38 @@ def _content_lines(content: Content, strings: Strings) -> list[str]:
     return lines
 
 
-def _render_note(item: Item, strings: Strings, topic_style: str) -> str:
+def _render_note(
+    item: Item, strings: Strings, topic_style: str, platform: PlatformStrings = X_DEFAULT
+) -> str:
     """Render the wiki-side note for one item.
 
-    The media block lives between the tweet text and the `## Enlaces`
-    section: photos appear immediately under the tweet body, matching
-    how X itself renders them — natural read order, no jumping.
+    The media block lives between the post text and the links section:
+    photos appear immediately under the post body, matching how the
+    source platform itself renders them — natural read order, no jumping.
+
+    `platform` (fork addition, defaults to X's original wording) supplies
+    the platform-specific heading/link text — see `xbrain.platform_strings`.
     """
-    lines = [_frontmatter(item), "", f"# {title_of(item)}", ""]
+    lines = [_frontmatter(item, platform), "", f"# {title_of(item)}", ""]
     lines += _enrichment_lines(item, strings, topic_style)
-    lines += ["## Tweet", "", item.text, ""]
+    lines += [f"## {platform.post_heading}", "", item.text, ""]
     media_lines = _render_media_lines(item)
     if media_lines:
         lines += media_lines
         lines.append("")
     if item.links:
-        lines.append("## Enlaces")
+        lines.append(f"## {platform.links_header}")
         lines += [f"- <{link.url}>" for link in item.links]
         lines.append("")
-    lines += [f"[Ver tweet original]({item.url})", ""]
+    lines += [f"[{platform.view_original}]({item.url})", ""]
     if item.content:
         lines += _content_lines(item.content, strings)
     return "\n".join(lines).rstrip()
 
 
-def _frontmatter(item: Item) -> str:
+def _frontmatter(item: Item, platform: PlatformStrings = X_DEFAULT) -> str:
     domains = ", ".join(sorted({link.domain for link in item.links}))
-    tags = ["x-knowledge"]
+    tags = [platform.vault_tag]
     if item.enriched:
         tags += item.enriched.topics  # topics already includes primary_topic
     if item.bookmark_folder:
@@ -622,18 +639,51 @@ def _count_topic_frequency(items: list[Item]) -> dict[str, int]:
     return topic_freq
 
 
-def _render_index(items: list[Item], strings: Strings, dashboard_href: str) -> str:
+def _render_source_counts_line(
+    items: list[Item], platform_strings: dict[PlatformName, PlatformStrings]
+) -> str:
+    """The `_render_index` "Bookmarks: N · Tweets propios: M [· ...]" line.
+
+    Split out of `_render_index` to keep its complexity down (radon) and
+    to isolate the byte-identity rule in one place: every X source is
+    always listed (even at zero — the exact pre-fork behaviour), while any
+    other platform's sources are listed only once they have >=1 item, so
+    an X-only store never grows a "LinkedIn saved posts: 0" line that
+    didn't exist before this fork.
+    """
+    present_sources = {item.source for item in items}
+    counts = (
+        (platform_strings[platform.name].source_labels[source], source)
+        for platform in PLATFORMS.values()
+        if platform.name in platform_strings
+        for source in platform.sources
+        if source in present_sources or platform.name == "x"
+    )
+    return " · ".join(
+        f"{label}: {sum(1 for item in items if item.source == source)}" for label, source in counts
+    )
+
+
+def _render_index(
+    items: list[Item],
+    strings: Strings,
+    dashboard_href: str,
+    platform_strings: dict[PlatformName, PlatformStrings] | None = None,
+) -> str:
     """Render the top-level index note: corpus stats and the topic list.
 
     `dashboard_href` is the absolute ``file://`` URI of ``dashboard.html`` so the
     index link opens the self-contained dashboard in the external browser (see
     `generate`); Obsidian neither lists nor renders the raw ``.html`` itself.
+
+    `platform_strings` (fork addition, defaults to X-only) supplies the
+    per-source counter labels — see `_render_source_counts_line`.
     """
-    bookmarks = sum(1 for i in items if i.source == "bookmark")
-    own = sum(1 for i in items if i.source == "own_tweet")
+    platform_strings = platform_strings or {"x": X_DEFAULT}
     noted = sum(1 for i in items if _has_note(i))
     enriched = sum(1 for i in items if i.enriched)
     topic_freq = _count_topic_frequency(items)
+    source_counts = _render_source_counts_line(items, platform_strings)
     lines = [
         "# XBrain",
         "",
@@ -642,7 +692,7 @@ def _render_index(items: list[Item], strings: Strings, dashboard_href: str) -> s
         f"## {strings.summary_header}",
         "",
         f"- Items totales: {len(items)}",
-        f"- Bookmarks: {bookmarks} · Tweets propios: {own}",
+        f"- {source_counts}",
         f"- Con nota propia: {noted}",
         f"- Enriquecidos: {enriched}",
         "",

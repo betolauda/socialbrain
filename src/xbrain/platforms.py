@@ -11,6 +11,7 @@ note filename and auth path stays byte-identical for X.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -85,16 +86,17 @@ def platform_for_item_id(item_id: str) -> Platform:
     return PLATFORMS["x"]
 
 
-def corpus_platform_label(store: dict[str, Item]) -> str:
+def corpus_platform_label(items: Iterable[Item]) -> str:
     """A human-readable label for which platform(s) a corpus spans.
 
     Used by corpus-wide LLM prompts (`vocab`, `topics`) where there is no
     single item to key wording off of. Returns e.g. ``"X"``,
     ``"LinkedIn"``, or ``"X and LinkedIn"`` for a mixed corpus — ordered by
     the `PLATFORMS` registry, not alphabetically, so X (the original
-    platform) always leads.
+    platform) always leads. Accepts any iterable of `Item` — a store's
+    `.values()`, a plain list, whatever the caller already has on hand.
     """
-    present_names = {platform_for_source(item.source).name for item in store.values()}
+    present_names = {platform_for_source(item.source).name for item in items}
     labels = [p.display for p in PLATFORMS.values() if p.name in present_names]
     return " and ".join(labels) if labels else "X"
 

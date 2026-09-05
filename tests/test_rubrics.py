@@ -37,6 +37,54 @@ def test_load_rubric_topics_has_no_placeholder():
     assert "{language}" not in a
 
 
+def test_load_rubric_substitutes_platform_placeholder():
+    """Fork addition: {platform} works identically to {language}."""
+    text = load_rubric("summary", platform="X")
+    assert "{platform}" not in text
+    assert "for one X post" in text
+
+
+def test_load_rubric_supports_a_mixed_platform_label():
+    text = load_rubric("vocab", platform="X and LinkedIn")
+    assert "{platform}" not in text
+    assert "a corpus of X and LinkedIn posts" in text
+
+
+def test_load_rubric_preserves_platform_placeholder_when_none():
+    text = load_rubric("summary")
+    assert "{platform}" in text
+
+
+def test_load_rubric_language_and_platform_together():
+    """Both substitutions apply independently in one call — the real
+    production call shape (executors/api.py, vocab.py, worksheet.py)."""
+    text = load_rubric("summary", language="Spanish", platform="LinkedIn")
+    assert "{language}" not in text
+    assert "{platform}" not in text
+    assert "for one LinkedIn post" in text
+    assert "**Language:** Spanish" in text
+
+
+def test_load_rubric_defensive_check_catches_unsubstituted_platform_placeholder(
+    tmp_path, monkeypatch
+):
+    """Same defensive regex as {language}, for {platform} typos."""
+    import pytest
+
+    from xbrain import rubrics as rubrics_mod
+
+    typo_dir = tmp_path / "rubrics"
+    typo_dir.mkdir()
+    (typo_dir / "rubric-typo.md").write_text(
+        "One {Platform} post.\n",  # capital P typo
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(rubrics_mod, "_RUBRICS_DIR", typo_dir)
+
+    with pytest.raises(ValueError, match=r"\{Platform\}"):
+        load_rubric("typo", platform="X")
+
+
 def test_load_rubric_defensive_check_catches_unsubstituted_placeholder(tmp_path, monkeypatch):
     """A typo like {Language} (capital L) survives str.replace and would
     silently ship the literal placeholder to the LLM. The defensive regex

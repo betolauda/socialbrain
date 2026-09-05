@@ -493,6 +493,76 @@ def test_note_renders_broken_link_evidence(tmp_path):
     assert "2026-05-17" in note
 
 
+def test_x_note_rendering_is_byte_identical_to_pre_fork_output(tmp_path):
+    """Fork addition (PR3): the platform-strings seam must not change a
+    single byte of X output. Renders with no `platform` argument (the
+    default path every pre-fork call site still takes) and asserts the
+    EXACT original literals — "## Tweet", "Ver tweet original",
+    "x-knowledge" — are present verbatim, not just "some heading"."""
+    from xbrain.generate import generate
+
+    item = _item("1", with_link=True, text="hello world")
+    generate({"1": item}, tmp_path)
+    note = next((tmp_path / "items").glob("*.md")).read_text(encoding="utf-8")
+    assert "## Tweet\n\nhello world" in note
+    assert "[Ver tweet original](https://x.com/a/status/1)" in note
+    assert "tags: [x-knowledge]" in note
+    assert "## Enlaces" in note
+
+
+def test_render_index_source_line_is_byte_identical_for_an_x_only_store(tmp_path):
+    """An X-only store — even an empty one — must still print BOTH X
+    counters, including a zero, exactly as before this fork (filtering by
+    "count > 0" would silently drop a `Tweets propios: 0` line that
+    existed pre-fork)."""
+    store = {"1": _item("1", with_link=True)}
+    generate(store, tmp_path)
+    index = (tmp_path / "_index.md").read_text(encoding="utf-8")
+    assert "- Bookmarks: 1 · Tweets propios: 0" in index
+
+
+def _linkedin_item(item_id: str) -> Item:
+    return Item(
+        id=f"li-{item_id}",
+        source="li_saved",
+        url=f"https://www.linkedin.com/feed/update/urn:li:activity:{item_id}/",
+        author=Author(handle="jane-doe", name="Jane Doe"),
+        text="A LinkedIn post about second brains.",
+        created_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        captured_at=datetime(2026, 6, 2, tzinfo=timezone.utc),
+        links=[Link(url="https://example.com/article", domain="example.com")],
+    )
+
+
+def test_linkedin_note_uses_linkedin_wording(tmp_path):
+    """A hydrated LinkedIn item renders with LinkedIn's PlatformStrings —
+    "## Post", not "## Tweet"; "linkedin-knowledge" tag, not "x-knowledge"."""
+    generate({"li-1": _linkedin_item("1")}, tmp_path, output_language="Spanish")
+    note = next((tmp_path / "items").glob("*.md")).read_text(encoding="utf-8")
+    assert "## Post\n\nA LinkedIn post about second brains." in note
+    assert "[Ver post original](https://www.linkedin.com/feed/update/urn:li:activity:1/)" in note
+    assert "tags: [linkedin-knowledge]" in note
+    assert "## Tweet" not in note
+
+
+def test_linkedin_note_wording_varies_by_output_language_unlike_x(tmp_path):
+    """X's PlatformStrings ignores `output_language` entirely (pre-existing
+    hardcoded-literal behaviour, preserved on purpose). LinkedIn is new
+    content with no legacy byte-output to protect, so it DOES localize."""
+    generate({"li-1": _linkedin_item("1")}, tmp_path, output_language="English")
+    note = next((tmp_path / "items").glob("*.md")).read_text(encoding="utf-8")
+    assert "[View original post]" in note
+
+
+def test_render_index_source_line_for_a_mixed_x_and_linkedin_store(tmp_path):
+    """LinkedIn's counter only appears once LinkedIn has data — an X-only
+    store gets no "LinkedIn saved posts: 0" noise (see previous test)."""
+    store = {"1": _item("1", with_link=True), "li-1": _linkedin_item("1")}
+    generate(store, tmp_path, output_language="Spanish")
+    index = (tmp_path / "_index.md").read_text(encoding="utf-8")
+    assert "- Bookmarks: 1 · Tweets propios: 0 · Guardados de LinkedIn: 1" in index
+
+
 def test_note_renders_broken_link_evidence_for_a_failed_li_post(tmp_path):
     """A failed LinkedIn hydration must render as structured evidence, same
     as a failed X fetch — never disappear silently (invariant #5). Fork

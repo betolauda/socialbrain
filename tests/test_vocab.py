@@ -44,6 +44,35 @@ def test_induce_vocab_runs_map_then_reduce():
     for call in client.messages.calls:
         assert "{language}" not in call["system"]
         assert "English" in call["system"]
+        # Fork addition: same regression guard for {platform} — an X-only
+        # store (every item here is source="bookmark") must substitute "X".
+        assert "{platform}" not in call["system"]
+        assert "a corpus of X posts" in call["system"]
+
+
+def test_induce_vocab_uses_mixed_platform_label_for_a_linkedin_and_x_corpus():
+    store = {
+        "1": _item("1", "an x post"),
+        "li-2": Item(
+            id="li-2",
+            source="li_saved",
+            url="https://www.linkedin.com/feed/update/urn:li:activity:2/",
+            author=Author(handle="jane", name="Jane"),
+            text="a linkedin post",
+            created_at=datetime(2026, 5, 1, tzinfo=timezone.utc),
+            captured_at=datetime(2026, 5, 16, tzinfo=timezone.utc),
+        ),
+    }
+    client = FakeAnthropic(
+        [
+            {"candidates": [{"slug": "ai", "description": "AI."}]},
+            {"topics": [{"slug": "misc", "description": "Noise."}]},
+        ]
+    )
+    induce_vocab(
+        store, target_count=1, model="m", output_language="English", client=client, chunk_size=50
+    )
+    assert "a corpus of X and LinkedIn posts" in client.messages.calls[0]["system"]
 
 
 def test_induce_vocab_chunks_the_corpus():
