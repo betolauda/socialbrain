@@ -28,7 +28,33 @@ def test_state_defaults_are_empty_cursors():
     state = State()
     assert state.bookmarks.last_seen_id is None
     assert state.own_tweets.last_seen_id is None
+    assert state.li_saved.last_seen_id is None
     assert state.archive_imported is None
+    assert state.li_saved_imported is None
+
+
+def test_state_cursor_accessor_matches_named_fields():
+    state = State()
+    assert state.cursor("bookmark") is state.bookmarks
+    assert state.cursor("own_tweet") is state.own_tweets
+    assert state.cursor("li_saved") is state.li_saved
+
+
+def test_state_loads_a_pre_fork_state_json_without_li_saved():
+    """A `state.json` written before this fork has no `li_saved` key.
+
+    Pydantic's defaulted fields load it unchanged — no manual migration —
+    per the same convention as invariant #9/#12 in ARCHITECTURE.md.
+    """
+    legacy_json = (
+        '{"bookmarks": {"last_seen_id": "123", "last_run": null}, '
+        '"own_tweets": {"last_seen_id": null, "last_run": null}, '
+        '"archive_imported": null}'
+    )
+    state = State.model_validate_json(legacy_json)
+    assert state.bookmarks.last_seen_id == "123"
+    assert state.li_saved.last_seen_id is None
+    assert state.li_saved_imported is None
 
 
 def test_enrichment_has_primary_topic_and_no_note_worthiness():

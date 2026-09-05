@@ -32,8 +32,8 @@ land:
 
 | PR | Core files touched | Δ lines (core only) |
 |---|---|---|
-| 0 | docs, `pyproject.toml` | branding only, not counted |
-| 1 | `models.py`, `cli.py` | _pending_ |
+| 0 | docs, `pyproject.toml`, `.github/workflows/quality.yml` | branding + a pre-existing CI reproducibility bug fix, not counted |
+| 1 | `models.py` (+35/-4), `cli.py` (+9/-2 incl. import), `generate.py` (+1/-1) | **~39 net** |
 | 2 | `config.py`, `cli.py` | _pending_ |
 | 3 | `generate.py`, `rubrics.py` + 3 rubric `.md` | _pending_ |
 | 7 | `media.py`, `fetch.py` | _pending_ |

@@ -555,7 +555,7 @@ def _content_lines(content: Content, strings: Strings) -> list[str]:
             else:
                 heading = source.title or source.url
                 lines += [f"## {strings.content_header}: {heading}", "", source.text, ""]
-        elif source.kind in ("external_article", "x_article"):
+        elif source.kind in ("external_article", "x_article", "li_post"):
             lines += [_broken_link_line(source, content.fetched_at), ""]
     return lines
 

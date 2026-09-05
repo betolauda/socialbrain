@@ -493,6 +493,46 @@ def test_note_renders_broken_link_evidence(tmp_path):
     assert "2026-05-17" in note
 
 
+def test_note_renders_broken_link_evidence_for_a_failed_li_post(tmp_path):
+    """A failed LinkedIn hydration must render as structured evidence, same
+    as a failed X fetch — never disappear silently (invariant #5). Fork
+    addition: pins the one-line `generate._content_lines` change that adds
+    `li_post` alongside `external_article`/`x_article`."""
+    from datetime import datetime, timezone
+
+    from xbrain.generate import generate
+
+    item = Item(
+        id="li-1",
+        source="li_saved",
+        url="https://www.linkedin.com/feed/update/urn:li:activity:1/",
+        author=Author(handle="", name=""),
+        text="",
+        created_at=datetime(2026, 5, 1, tzinfo=timezone.utc),
+        captured_at=datetime(2026, 5, 16, tzinfo=timezone.utc),
+        links=[
+            Link(
+                url="https://www.linkedin.com/feed/update/urn:li:activity:1/", domain="linkedin.com"
+            )
+        ],
+        content=Content(
+            fetched_at=datetime(2026, 5, 17, tzinfo=timezone.utc),
+            sources=[
+                ContentSourceFailure(
+                    kind="li_post",
+                    url="https://www.linkedin.com/feed/update/urn:li:activity:1/",
+                    http_status=None,
+                    failure_reason="empty_content",
+                )
+            ],
+        ),
+    )
+    generate({"li-1": item}, tmp_path)
+    note = next((tmp_path / "items").glob("*-li-1.md")).read_text(encoding="utf-8")
+    assert "Enlace roto" in note
+    assert "2026-05-17" in note
+
+
 # --------------------------------------------------------------------- i18n
 
 
