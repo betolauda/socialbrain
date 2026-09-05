@@ -16,7 +16,7 @@ import typer
 
 from xbrain import snapshot
 from xbrain.archive import parse_archive
-from xbrain.config import Config, load_config
+from xbrain.config import Config, load_config, require_x_handle
 from xbrain.cursors import newest_id
 from xbrain.describe import apply_describe_worksheet, export_describe_worksheet
 from xbrain.describe import describe_all as run_describe_all
@@ -223,7 +223,7 @@ def _run_extract(
     state = load_state(cfg.state_path)
     targets = {
         "bookmark": _BOOKMARKS_URL,
-        "own_tweet": f"https://x.com/{cfg.x_handle}",
+        "own_tweet": f"https://x.com/{require_x_handle(cfg)}",
     }
     source_sets: dict[str, list[SourceName]] = {
         "bookmarks": ["bookmark"],
@@ -454,7 +454,7 @@ def import_archive(zip_path: Path) -> None:
     cfg = _config()
     store = load_store(cfg.items_path)
     state = load_state(cfg.state_path)
-    author = Author(handle=cfg.x_handle, name=cfg.x_handle)
+    author = Author(handle=require_x_handle(cfg), name=cfg.x_handle)
     added = merge_items(store, parse_archive(zip_path, author))
     state.archive_imported = ArchiveImport(file=zip_path.name, at=datetime.now(timezone.utc))
     save_store(store, cfg.items_path)

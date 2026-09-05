@@ -9,6 +9,7 @@ from typing import get_args
 
 from xbrain.i18n import strings_for
 from xbrain.models import ExecutorName
+from xbrain.platforms import PLATFORMS, PlatformName
 
 # In-body `**Topics:**` line styles. `wikilink` (default) keeps the current
 # navigation-first behaviour; `hashtag` emits Obsidian tags so the line pivots
@@ -57,6 +58,11 @@ class Config:
     # (`None` → the vision tool's own default).
     vision_command: str
     vision_model: str | None
+    # Fork additions (see docs/FORK.md) — defaulted so every pre-fork
+    # `Config(...)` construction still compiles unchanged.
+    linkedin_max_per_run: int = 25
+    linkedin_min_delay_s: float = 45.0
+    linkedin_max_delay_s: float = 120.0
 
     @property
     def items_path(self) -> Path:
@@ -84,18 +90,70 @@ class Config:
     def topics_path(self) -> Path:
         return self.data_dir / "topics.json"
 
+    def storage_state_for(self, platform: PlatformName) -> Path:
+        """The Playwright session-state file for one platform.
+
+        Each platform gets its own file (see `xbrain.platforms.PLATFORMS`)
+        so an X session and a LinkedIn session never collide.
+        """
+        return self.repo_root / "auth" / PLATFORMS[platform].auth_filename
+
     @property
     def storage_state_path(self) -> Path:
-        return self.repo_root / "auth" / "storage_state.json"
+        return self.storage_state_for("x")
+
+
+def require_x_handle(cfg: Config) -> str:
+    """The X handle, raised loudly if unset.
+
+    Fork addition: `[x]` in config.toml is now optional (a LinkedIn-only
+    config need not set an X handle at all), so the two X-only call sites
+    that actually need it (`_run_extract`'s own-tweet URL, `import_archive`'s
+    `Author`) must check explicitly rather than relying on `load_config`
+    having already validated it.
+    """
+    if not cfg.x_handle:
+        raise ValueError(
+            "config.toml: [x].handle is required for X commands — set it, or use "
+            "the LinkedIn CLI (`socialbrain-li`) if you only use LinkedIn."
+        )
+    return cfg.x_handle
+
+
+def _load_linkedin_settings(settings: dict) -> tuple[int, float, float]:
+    """Parse and validate `[linkedin]`, split out of `load_config` to keep
+    that function's complexity down (radon). The three limits are
+    guardrails, not suggestions — see docs/FORK.md and
+    `xbrain.linkedin.hydrate`: LinkedIn's User Agreement prohibits browser
+    automation outright, and low volume + heavy pacing is what keeps this
+    fork's hydrator from being an obvious high-volume bot signature.
+    """
+    linkedin = settings.get("linkedin", {})
+    max_per_run = int(linkedin.get("max_per_run", 25))
+    if not 1 <= max_per_run <= 100:
+        raise ValueError("config.toml: [linkedin].max_per_run must be between 1 and 100")
+    min_delay_s = float(linkedin.get("min_delay_s", 45.0))
+    max_delay_s = float(linkedin.get("max_delay_s", 120.0))
+    if min_delay_s < 20.0 or max_delay_s < min_delay_s:
+        raise ValueError(
+            "config.toml: [linkedin] delays must satisfy 20 <= min_delay_s <= max_delay_s"
+        )
+    return max_per_run, min_delay_s, max_delay_s
 
 
 def load_config(repo_root: Path) -> Config:
     """Load config.toml from a repo root into a Config."""
     settings = tomllib.loads((repo_root / "config.toml").read_text(encoding="utf-8"))
     paths = settings["paths"]
-    x_settings = settings["x"]
-    if not x_settings.get("handle"):
+    # Fork addition: `[x]` is optional — a LinkedIn-only user need not set an
+    # X handle. A PRESENT `[x]` section with an empty handle is still an
+    # error (same message as before), so an existing config's validation
+    # behaviour is unchanged; only a config that omits `[x]` entirely now
+    # loads, where it previously could not.
+    x_settings = settings.get("x")
+    if x_settings is not None and not x_settings.get("handle"):
         raise ValueError("config.toml: [x].handle is empty — set your X handle")
+    x_settings = x_settings or {}
     vault = Path(paths["vault"]).expanduser()
     enrich = settings.get("enrich", {})
     vocab = settings.get("vocab", {})
@@ -126,12 +184,15 @@ def load_config(repo_root: Path) -> Config:
     describe = settings.get("describe", {})
     transcribe = settings.get("transcribe", {})
     vision = settings.get("vision", {})
+    linkedin_max_per_run, linkedin_min_delay_s, linkedin_max_delay_s = _load_linkedin_settings(
+        settings
+    )
     return Config(
         repo_root=repo_root,
         vault=vault,
         output_dir=vault / paths["output_subdir"],
         data_dir=repo_root / paths["data_dir"],
-        x_handle=x_settings["handle"],
+        x_handle=x_settings.get("handle", ""),
         enrich_executor=executor,
         enrich_model=enrich.get("model", "claude-haiku-4-5-20251001"),
         vocab_target_count=target_count,
@@ -144,4 +205,7 @@ def load_config(repo_root: Path) -> Config:
         transcribe_model=transcribe.get("model"),
         vision_command=vision.get("command", ""),
         vision_model=vision.get("model"),
+        linkedin_max_per_run=linkedin_max_per_run,
+        linkedin_min_delay_s=linkedin_min_delay_s,
+        linkedin_max_delay_s=linkedin_max_delay_s,
     )
