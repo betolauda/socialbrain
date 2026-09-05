@@ -1,10 +1,13 @@
-# XBrain (`xbrain`)
+# socialbrain (`xbrain` core, `socialbrain` / `xbrain` / `socialbrain-li` CLIs)
 
-![Quality](https://github.com/VGonPa/xbrain/actions/workflows/quality.yml/badge.svg)
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-> Your X bookmarks and posts, turned into a second brain.
+> A fork of [xbrain](https://github.com/VGonPa/xbrain) by Víctor González
+> Pacheco, extended with a second source. See [`NOTICE.md`](NOTICE.md) for
+> attribution and [`docs/FORK.md`](docs/FORK.md) for what changed and why.
+
+> Your X bookmarks and LinkedIn saved posts, turned into a second brain.
 
 You bookmark a sharp thread, a research paper, a tool someone shipped over the
 weekend — and a small part of your brain checks a box: *handled, I have that

@@ -17,7 +17,6 @@ jobs:
         run: uv python install 3.12
       - name: Create venv and install dependencies
         run: |
-          uv venv
-          uv pip install -e ".[dev]"
+          uv sync --extra dev --locked
       - name: Quality gate
         run: bash scripts/check.sh
