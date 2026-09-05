@@ -45,17 +45,23 @@ def test_platform_for_item_id_is_a_pure_prefix_test():
 
 
 def test_corpus_platform_label_x_only():
-    store = {"1": _item("1", "bookmark")}
-    assert corpus_platform_label(store) == "X"
+    items = [_item("1", "bookmark")]
+    assert corpus_platform_label(items) == "X"
 
 
 def test_corpus_platform_label_mixed():
-    store = {"1": _item("1", "bookmark"), "2": _item("li-2", "li_saved")}
-    assert corpus_platform_label(store) == "X and LinkedIn"
+    items = [_item("1", "bookmark"), _item("li-2", "li_saved")]
+    assert corpus_platform_label(items) == "X and LinkedIn"
 
 
-def test_corpus_platform_label_empty_store_defaults_to_x():
-    assert corpus_platform_label({}) == "X"
+def test_corpus_platform_label_accepts_a_dicts_values_view():
+    """The common real call shape: `corpus_platform_label(store.values())`."""
+    store = {"1": _item("1", "bookmark")}
+    assert corpus_platform_label(store.values()) == "X"
+
+
+def test_corpus_platform_label_empty_is_x():
+    assert corpus_platform_label([]) == "X"
 
 
 def test_is_hydrated_false_for_a_bare_stub():

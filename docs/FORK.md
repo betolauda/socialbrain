@@ -26,16 +26,27 @@ guiding constraint on every change here is:
 > restructuring. Where a seam must be opened in an existing file, make it the
 > smallest change that could plausibly be upstreamed on its own.
 
-Target: **under ~80 changed lines across the whole source-agnostic core**,
-excluding the dashboard (see below). Track the actual number here as PRs
-land:
+Original target: under ~80 changed lines across the whole core. **Actual
+running total through PR3: ~227 net lines** — well over that original
+estimate, and worth saying plainly rather than quietly dropping the
+number. The overrun is concentrated in two honest places: (1) every
+seam carries a docstring explaining *why* it's shaped the way it is —
+that's deliberate, since the whole point of minimizing divergence is
+that a future reader (including a future upstream sync) can tell a
+fork seam from an upstream one at a glance; (2) PR3's presentation
+layer turned out to be a genuinely larger surface than the initial
+estimate assumed (5 files needed a `platform=`/`{platform}` thread,
+not just `generate.py`). The count that actually matters more than the
+absolute number: every PR so far is additive-only or default-preserving,
+verified byte-identical against the real 1777-item wiki. Track the
+actual number here as PRs land:
 
 | PR | Core files touched | Δ lines (core only) |
 |---|---|---|
 | 0 | docs, `pyproject.toml`, `.github/workflows/quality.yml` | branding + a pre-existing CI reproducibility bug fix, not counted |
 | 1 | `models.py` (+35/-4), `cli.py` (+9/-2 incl. import), `generate.py` (+1/-1) | **~39 net** |
 | 2 | `config.py` (+72/-6), `cli.py` (+6/-3) | **~71 net** (most of it docstrings/validation on new, additive fields — no existing field or behavior changed) |
-| 3 | `generate.py`, `rubrics.py` + 3 rubric `.md` | _pending_ |
+| 3 | `generate.py`, `rubrics.py`, `vocab.py`, `worksheet.py`, `executors/api.py`, `platforms.py` (widened) | **~117 net** (the biggest single PR — presentation was the largest gap upstream left; verified byte-identical against the real 1777-item wiki both before and after) |
 | 7 | `media.py`, `fetch.py` | _pending_ |
 | 8 | `dashboard.py` + `resources/dashboard.template.html` | _pending, deliberately last_ |
 

@@ -14,6 +14,7 @@ from pathlib import Path
 
 from xbrain.executors.api import _content_image_descriptions
 from xbrain.models import ContentSourceSuccess, Item, Topic
+from xbrain.platforms import corpus_platform_label
 from xbrain.rubrics import (
     ARTICLE_CHAR_LIMIT,
     TRANSCRIPT_CHAR_LIMIT,
@@ -83,8 +84,12 @@ def export_worksheet(
             "topic signal, not just `text`. Then run: xbrain enrich --apply <this file>."
         ),
         "rubrics": {
-            "summary": load_rubric("summary", language=output_language),
-            "topics": load_rubric("topics", language=output_language),
+            "summary": load_rubric(
+                "summary", language=output_language, platform=corpus_platform_label(items)
+            ),
+            "topics": load_rubric(
+                "topics", language=output_language, platform=corpus_platform_label(items)
+            ),
         },
         "vocab": [t.model_dump() for t in vocab],
         "items": [

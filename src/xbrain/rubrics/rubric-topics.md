@@ -1,6 +1,6 @@
 # Rubric — Topic assignment
 
-Assign topics to one X post from the controlled vocabulary provided.
+Assign topics to one {platform} post from the controlled vocabulary provided.
 
 - You receive the vocabulary as a list of `slug` + `description`. Use **only**
   those slugs. Never invent a slug.
@@ -15,8 +15,9 @@ Assign topics to one X post from the controlled vocabulary provided.
 
 ## Classifying when there is no fetched article
 
-Many posts link to an article that could not be downloaded (especially X's own
-articles). **A missing article is NOT a reason to fall back to `misc`.**
+Many posts link to an article that could not be downloaded (especially the
+platform's own long-form articles). **A missing article is NOT a reason to
+fall back to `misc`.**
 
 - Classify from the **post's own text** and from the **link's URL and domain**.
   The domain alone is strong signal: `arxiv.org` → research, `github.com` →

@@ -1,6 +1,6 @@
 # Rubric — Vocabulary induction
 
-Induce a topic taxonomy from a corpus of X posts.
+Induce a topic taxonomy from a corpus of {platform} posts.
 
 - **Map step:** given a chunk of posts, propose candidate topics. Each candidate
   is a short kebab-case `slug` plus a one-sentence `description`. Propose topics

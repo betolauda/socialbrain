@@ -1,6 +1,6 @@
 # Rubric — Item summary
 
-Produce a `summary` for one X post (a bookmark or the user's own tweet).
+Produce a `summary` for one {platform} post.
 
 - **Language:** {language}, regardless of the post's language.
 - **Length:** 1-3 sentences. Concise. No preamble ("Este post trata de...").

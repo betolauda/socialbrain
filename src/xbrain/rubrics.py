@@ -18,6 +18,11 @@ from xbrain.models import Topic
 # str.replace("{language}", ...) would silently miss.
 _LEFTOVER_PLACEHOLDER = re.compile(r"\{[^}]*language[^}]*\}", re.IGNORECASE)
 
+# Fork addition (see docs/FORK.md): the same leftover-sniff mechanism, for
+# the `{platform}` placeholder introduced so a rubric reads "X post" or
+# "LinkedIn post" instead of a hardcoded "X post".
+_LEFTOVER_PLACEHOLDER_PLATFORM = re.compile(r"\{[^}]*platform[^}]*\}", re.IGNORECASE)
+
 _PKG = Path(__file__).resolve().parent
 _RUBRICS_DIR = _PKG / "rubrics"
 _GUARDRAILS = _PKG / "guardrails.yaml"
@@ -56,19 +61,23 @@ def truncate_transcript(text: str, limit: int) -> str:
     return text[:limit].rstrip() + "\n[… transcript truncated …]"
 
 
-def load_rubric(name: str, *, language: str | None = None) -> str:
+def load_rubric(name: str, *, language: str | None = None, platform: str | None = None) -> str:
     """Return the text of `rubrics/rubric-<name>.md`.
 
     When `language` is set, any `{language}` placeholder in the rubric is
     substituted with the given value (e.g. ``"English"``). When ``None``
     (tests, manual inspection), the placeholder is preserved verbatim.
+    `platform` (fork addition) works identically for `{platform}` (e.g.
+    ``"X"``, ``"LinkedIn"``, or ``"X and LinkedIn"`` for a mixed corpus —
+    see `xbrain.platforms.corpus_platform_label`).
 
     Substitution is plain `str.replace`; rubrics without a placeholder are
-    returned unchanged regardless of `language`.
+    returned unchanged regardless of `language`/`platform`.
 
-    Defensive check: when `language` is provided, the returned text must not
-    contain a literal `{language}` (catches typos like `{Language}` that
-    would silently survive substitution and ship the placeholder to the LLM).
+    Defensive check: when a substitution value is provided, the returned
+    text must not contain a literal leftover placeholder (catches typos
+    like `{Language}` that would silently survive substitution and ship
+    the placeholder to the LLM).
     """
     path = _RUBRICS_DIR / f"rubric-{name}.md"
     if not path.exists():
@@ -82,6 +91,15 @@ def load_rubric(name: str, *, language: str | None = None) -> str:
                 f"Rubric {name!r} contains an unresolved placeholder "
                 f"{leftover.group()!r}. The supported form is `{{language}}` "
                 f"(lowercase); check for case-variant typos."
+            )
+    if platform is not None:
+        text = text.replace("{platform}", platform)
+        leftover_platform = _LEFTOVER_PLACEHOLDER_PLATFORM.search(text)
+        if leftover_platform is not None:
+            raise ValueError(
+                f"Rubric {name!r} contains an unresolved placeholder "
+                f"{leftover_platform.group()!r}. The supported form is "
+                f"`{{platform}}` (lowercase); check for case-variant typos."
             )
     return text
 
