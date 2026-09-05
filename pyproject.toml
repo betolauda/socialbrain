@@ -1,7 +1,7 @@
 [project]
-name = "xbrain"
+name = "socialbrain"
 version = "0.1.0"
-description = "XBrain — extract X bookmarks and tweets into an Obsidian wiki"
+description = "socialbrain — extract your X bookmarks and LinkedIn saved posts into one Obsidian wiki. A fork of xbrain (VGonPa/xbrain) by Víctor González Pacheco, extended to a second source."
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.6",
@@ -15,7 +15,14 @@ dependencies = [
 ]
 
 [project.scripts]
+# The importable package stays `xbrain` (see docs/FORK.md) — only the
+# distribution name and console scripts are rebranded, so cherry-picking
+# from upstream never touches an import line.
+socialbrain = "xbrain.cli:app"
 xbrain = "xbrain.cli:app"
+# `socialbrain-li` (xbrain.linkedin.cli:app) is added in the PR that
+# introduces src/xbrain/linkedin/ — declaring it earlier would point at a
+# module that doesn't exist yet.
 
 [project.optional-dependencies]
 dev = [

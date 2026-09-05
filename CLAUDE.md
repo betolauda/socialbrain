@@ -1,7 +1,14 @@
-# CLAUDE.md — xbrain
+# CLAUDE.md — xbrain (fork: socialbrain)
 
-Python CLI (`xbrain`) that extracts X bookmarks/tweets into a JSON store and
-generates an Obsidian wiki.
+Python CLI (importable package `xbrain`, distribution/console-scripts
+`socialbrain`/`xbrain`/`socialbrain-li`) that extracts X bookmarks/tweets AND
+LinkedIn saved posts into one JSON store and generates one Obsidian wiki.
+
+**This is a fork of `VGonPa/xbrain` (MIT, Víctor González Pacheco).** Before
+touching a core (source-agnostic) file, read `docs/FORK.md` — it has the
+cherry-pick-cost discipline this fork runs on and the ledger of what's been
+pulled from upstream (`docs/UPSTREAM_SYNC.md`). The package stays named
+`xbrain` internally on purpose; only user-facing surfaces are `socialbrain`.
 
 ## Stack
 - Python 3.12+ (venv currently runs 3.13), `uv`, `pydantic` v2, `typer`, `playwright`, `trafilatura`, `pytest`.

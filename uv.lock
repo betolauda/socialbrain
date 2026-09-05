@@ -1420,6 +1420,68 @@ wheels = [
 ]
 
 [[package]]
+name = "socialbrain"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "anthropic" },
+    { name = "pillow" },
+    { name = "playwright" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "requests" },
+    { name = "trafilatura" },
+    { name = "typer" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "bandit" },
+    { name = "deptry" },
+    { name = "detect-secrets" },
+    { name = "interrogate" },
+    { name = "mypy" },
+    { name = "poethepoet" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "radon" },
+    { name = "ruff" },
+    { name = "vulture" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "requests-mock" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anthropic", specifier = ">=0.39" },
+    { name = "bandit", marker = "extra == 'dev'", specifier = ">=1.7" },
+    { name = "deptry", marker = "extra == 'dev'", specifier = ">=0.16" },
+    { name = "detect-secrets", marker = "extra == 'dev'", specifier = ">=1.5" },
+    { name = "interrogate", marker = "extra == 'dev'", specifier = ">=1.7" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
+    { name = "pillow", specifier = ">=12.2.0" },
+    { name = "playwright", specifier = ">=1.44" },
+    { name = "poethepoet", marker = "extra == 'dev'", specifier = ">=0.27" },
+    { name = "pydantic", specifier = ">=2.6" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "radon", marker = "extra == 'dev'", specifier = ">=6.0" },
+    { name = "requests", specifier = ">=2.34.2" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },
+    { name = "trafilatura", specifier = ">=1.9" },
+    { name = "typer", specifier = ">=0.12" },
+    { name = "vulture", marker = "extra == 'dev'", specifier = ">=2.11" },
+]
+provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "requests-mock", specifier = ">=1.12.1" }]
+
+[[package]]
 name = "stevedore"
 version = "5.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1583,65 +1645,3 @@ sdist = { url = "https://files.pythonhosted.org/packages/66/3e/4d08c5903b2c0c70c
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f5/be/f935130312330614811dae2ea9df3f395f6d63889eb6c2e68c14507152ee/vulture-2.16-py3-none-any.whl", hash = "sha256:6e0f1c312cef1c87856957e5c2ca9608834a7c794c2180477f30bf0e4cc58eee", size = 26993, upload-time = "2026-03-25T14:41:26.21Z" },
 ]
-
-[[package]]
-name = "xbrain"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "anthropic" },
-    { name = "pillow" },
-    { name = "playwright" },
-    { name = "pydantic" },
-    { name = "pyyaml" },
-    { name = "requests" },
-    { name = "trafilatura" },
-    { name = "typer" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "bandit" },
-    { name = "deptry" },
-    { name = "detect-secrets" },
-    { name = "interrogate" },
-    { name = "mypy" },
-    { name = "poethepoet" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "radon" },
-    { name = "ruff" },
-    { name = "vulture" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "requests-mock" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "anthropic", specifier = ">=0.39" },
-    { name = "bandit", marker = "extra == 'dev'", specifier = ">=1.7" },
-    { name = "deptry", marker = "extra == 'dev'", specifier = ">=0.16" },
-    { name = "detect-secrets", marker = "extra == 'dev'", specifier = ">=1.5" },
-    { name = "interrogate", marker = "extra == 'dev'", specifier = ">=1.7" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
-    { name = "pillow", specifier = ">=12.2.0" },
-    { name = "playwright", specifier = ">=1.44" },
-    { name = "poethepoet", marker = "extra == 'dev'", specifier = ">=0.27" },
-    { name = "pydantic", specifier = ">=2.6" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "radon", marker = "extra == 'dev'", specifier = ">=6.0" },
-    { name = "requests", specifier = ">=2.34.2" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },
-    { name = "trafilatura", specifier = ">=1.9" },
-    { name = "typer", specifier = ">=0.12" },
-    { name = "vulture", marker = "extra == 'dev'", specifier = ">=2.11" },
-]
-provides-extras = ["dev"]
-
-[package.metadata.requires-dev]
-dev = [{ name = "requests-mock", specifier = ">=1.12.1" }]
