@@ -29,8 +29,9 @@ logger = logging.getLogger(__name__)
 ExecutorName = Literal["manual", "api", "claude-code"]
 
 # The set of item source names — one source of truth shared by the data model
-# and the GraphQL parser.
-SourceName = Literal["bookmark", "own_tweet"]
+# and the GraphQL parser. `li_saved` (fork addition) is a LinkedIn saved post,
+# imported from the official data export — see `xbrain.linkedin.saved_items`.
+SourceName = Literal["bookmark", "own_tweet", "li_saved"]
 
 # Categorised reasons a content fetch can fail — structured evidence so a
 # broken link is demonstrable, not assumed (design §4).
@@ -53,7 +54,13 @@ FailureReason = Literal[
 # `digest-video` stage (#44): a bookmarked video's transcript is attached as a
 # `ContentSourceSuccess(kind="x_video")` so the existing enrich → topics →
 # generate pipeline consumes it exactly like an article body.
-ContentKind = Literal["external_article", "x_article", "thread", "quoted_tweet", "x_video"]
+# `li_post` (fork addition) is a hydrated LinkedIn saved post's body — see
+# `xbrain.linkedin.hydrate`. Mirrors `x_video`: manufactured by a producer
+# outside `fetch`, then consumed by enrich → topics → generate like any
+# other content source.
+ContentKind = Literal[
+    "external_article", "x_article", "thread", "quoted_tweet", "x_video", "li_post"
+]
 
 
 class Author(BaseModel):
@@ -881,8 +888,28 @@ class ArchiveImport(BaseModel):
 
 
 class State(BaseModel):
-    """Top-level extractor state persisted in `data/state.json`."""
+    """Top-level extractor state persisted in `data/state.json`.
+
+    One named field per source, not a keyed map — see `docs/FORK.md` for why
+    (a keyed-map refactor would touch `cli._run_extract`/`cli.status`, high-
+    traffic upstream files, for a benefit this fork doesn't need with only
+    two sources). `cursor()` is the source-agnostic accessor call sites
+    should use instead of branching on `source` themselves.
+    """
 
     bookmarks: SourceCursor = Field(default_factory=SourceCursor)
     own_tweets: SourceCursor = Field(default_factory=SourceCursor)
+    li_saved: SourceCursor = Field(default_factory=SourceCursor)
     archive_imported: ArchiveImport | None = None
+    li_saved_imported: ArchiveImport | None = None
+
+    def cursor(self, source: SourceName) -> SourceCursor:
+        """The per-source extractor cursor, keyed by source name."""
+        return getattr(self, _CURSOR_FIELDS[source])
+
+
+_CURSOR_FIELDS: dict[SourceName, str] = {
+    "bookmark": "bookmarks",
+    "own_tweet": "own_tweets",
+    "li_saved": "li_saved",
+}

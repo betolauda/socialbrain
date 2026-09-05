@@ -17,6 +17,7 @@ import typer
 from xbrain import snapshot
 from xbrain.archive import parse_archive
 from xbrain.config import Config, load_config
+from xbrain.cursors import newest_id
 from xbrain.describe import apply_describe_worksheet, export_describe_worksheet
 from xbrain.describe import describe_all as run_describe_all
 from xbrain.describe import emit_summary_line as describe_emit_summary_line
@@ -234,7 +235,7 @@ def _run_extract(
     truncated: list[str] = []
     with x_context(cfg.storage_state_path, headless=headless) as context:
         for src in chosen:
-            cursor = state.bookmarks if src == "bookmark" else state.own_tweets
+            cursor = state.cursor(src)
             first_run = cursor.last_seen_id is None
             try:
                 items = extract_source(context, src, targets[src], known_ids, since, until)
@@ -254,7 +255,7 @@ def _run_extract(
                 )
             added = merge_items(store, items)
             if items:
-                cursor.last_seen_id = max(items, key=lambda i: int(i.id)).id
+                cursor.last_seen_id = newest_id(items)
             cursor.last_run = datetime.now(timezone.utc)
             typer.echo(f"{src}: {added} nuevos items")
     save_store(store, cfg.items_path)
@@ -1504,6 +1505,10 @@ def status() -> None:
     typer.echo(f"  enriquecidos: {sum(1 for i in store.values() if i.enriched)}")
     typer.echo(f"  última extracción bookmarks: {state.bookmarks.last_run}")
     typer.echo(f"  última extracción tweets: {state.own_tweets.last_run}")
+    # Only shown once LinkedIn has ever run, so an X-only `status` output
+    # stays byte-identical to before this source existed.
+    if state.li_saved.last_run is not None or state.li_saved_imported is not None:
+        typer.echo(f"  última extracción LinkedIn: {state.li_saved.last_run}")
 
 
 snapshot_app = typer.Typer(help="Gestionar snapshots de data/")
