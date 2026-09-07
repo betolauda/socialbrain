@@ -19,6 +19,7 @@ from pathlib import Path
 import typer
 
 from xbrain.config import Config, load_config
+from xbrain.linkedin.browser import login as run_login
 from xbrain.linkedin.saved_items import parse_saved_items
 from xbrain.models import ArchiveImport
 from xbrain.store import load_state, load_store, merge_items, save_state, save_store
@@ -70,6 +71,17 @@ def _handle_cli_errors(func: Callable) -> Callable:
             raise typer.Exit(code=1) from exc
 
     return wrapper
+
+
+@app.command()
+@_handle_cli_errors
+def login() -> None:
+    """Abre un navegador para iniciar sesión en LinkedIn y guarda la sesión.
+
+    La sesión se guarda en `auth/linkedin_storage_state.json` (gitignored),
+    separada de la de X. Re-ejecuta esto cuando la sesión caduque.
+    """
+    run_login(_config().storage_state_for("linkedin"))
 
 
 @app.command(name="import-saved")

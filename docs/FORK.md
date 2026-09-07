@@ -48,12 +48,13 @@ actual number here as PRs land:
 | 2 | `config.py` (+72/-6), `cli.py` (+6/-3) | **~71 net** (most of it docstrings/validation on new, additive fields — no existing field or behavior changed) |
 | 3 | `generate.py`, `rubrics.py`, `vocab.py`, `worksheet.py`, `executors/api.py`, `platforms.py` (widened) | **~117 net** (the biggest single PR — presentation was the largest gap upstream left; verified byte-identical against the real 1777-item wiki both before and after) |
 | 4 | none — all new files under `src/xbrain/linkedin/` (saved-items importer + `socialbrain-li` CLI); `pyproject.toml` console script only | **0** |
+| 5 | none — `src/xbrain/linkedin/browser.py` (LinkedIn `login` + `is_logged_out`) + a `socialbrain-li login` command; reuses `extract.browser.x_context` as-is | **0** |
 | 7 | `media.py`, `fetch.py` | _pending_ |
 | 8 | `dashboard.py` + `resources/dashboard.template.html` | _pending, deliberately last_ |
 
-PRs 5, 6 (LinkedIn session handling and the hydrator) are purely additive —
-new files under `src/xbrain/linkedin/` — and are not in this table because
-they touch zero core files, same as PR 4.
+PR 6 (the LinkedIn hydrator) is purely additive — new files under
+`src/xbrain/linkedin/` — and is not in this table because it touches zero
+core files, same as PRs 4 and 5.
 
 ## Why the importable package is still `xbrain`
 
