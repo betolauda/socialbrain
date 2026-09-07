@@ -20,9 +20,7 @@ dependencies = [
 # from upstream never touches an import line.
 socialbrain = "xbrain.cli:app"
 xbrain = "xbrain.cli:app"
-# `socialbrain-li` (xbrain.linkedin.cli:app) is added in the PR that
-# introduces src/xbrain/linkedin/ — declaring it earlier would point at a
-# module that doesn't exist yet.
+socialbrain-li = "xbrain.linkedin.cli:app"  # LinkedIn CLI — added with src/xbrain/linkedin/
 
 [project.optional-dependencies]
 dev = [
