@@ -49,12 +49,15 @@ actual number here as PRs land:
 | 3 | `generate.py`, `rubrics.py`, `vocab.py`, `worksheet.py`, `executors/api.py`, `platforms.py` (widened) | **~117 net** (the biggest single PR — presentation was the largest gap upstream left; verified byte-identical against the real 1777-item wiki both before and after) |
 | 4 | none — all new files under `src/xbrain/linkedin/` (saved-items importer + `socialbrain-li` CLI); `pyproject.toml` console script only | **0** |
 | 5 | none — `src/xbrain/linkedin/browser.py` (LinkedIn `login` + `is_logged_out`) + a `socialbrain-li login` command; reuses `extract.browser.x_context` as-is | **0** |
+| 6 | none — all new files under `src/xbrain/linkedin/` (`bpr` + `post` + `hydrate`); `socialbrain-li hydrate` command | **0** |
 | 7 | `media.py`, `fetch.py` | _pending_ |
 | 8 | `dashboard.py` + `resources/dashboard.template.html` | _pending, deliberately last_ |
 
-PR 6 (the LinkedIn hydrator) is purely additive — new files under
-`src/xbrain/linkedin/` — and is not in this table because it touches zero
-core files, same as PRs 4 and 5.
+PR 6 (the LinkedIn hydrator — `bpr.py` + `post.py` + `hydrate.py` and a
+`socialbrain-li hydrate` command) is purely additive: new files under
+`src/xbrain/linkedin/`, touching zero core files, same as PRs 4 and 5. It is
+listed with a **0** row above rather than omitted, so the ledger stays a
+complete record of every PR.
 
 ## Why the importable package is still `xbrain`
 
