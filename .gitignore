@@ -7,10 +7,13 @@ __pycache__/
 .coverage
 coverage.xml
 htmlcov/
-auth/storage_state.json
 *.tmp
 
 # Personal data and config — never commit (see launch plan §7)
+# auth/ holds one Playwright session file per platform (storage_state.json,
+# linkedin_storage_state.json, …) — every one is a live login, never tracked.
+auth/*
+!auth/.gitkeep
 data/*
 !data/.gitkeep
 config.toml
