@@ -173,13 +173,18 @@ def _media(card: etree._Element) -> tuple[list[MediaEntry], bool, list[str]]:
     return media, bool(warnings), warnings
 
 
+def _is_linkedin_host(netloc: str) -> bool:
+    host = netloc.split(":")[0].lower()
+    return host == "linkedin.com" or host.endswith(".linkedin.com")
+
+
 def _links(card: etree._Element) -> list[Link]:
     found: list[str] = []
     for anchor in card.xpath(".//a[@href]"):
         parsed = urlparse(anchor.get("href"))
-        if parsed.path.startswith("/safety/go") and "linkedin.com" in parsed.netloc:
+        if parsed.path.startswith("/safety/go") and _is_linkedin_host(parsed.netloc):
             target = parse_qs(parsed.query).get("url", [""])[0]
-        elif parsed.scheme in ("http", "https") and "linkedin.com" not in parsed.netloc:
+        elif parsed.scheme in ("http", "https") and not _is_linkedin_host(parsed.netloc):
             target = anchor.get("href")
         else:
             continue

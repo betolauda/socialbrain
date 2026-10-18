@@ -210,3 +210,13 @@ def test_the_notice_alone_does_not_condemn_a_page_that_has_the_container() -> No
 
 def test_empty_html_is_unrecognized() -> None:
     assert sdui.parse_page("", "111").kind == "unrecognized"
+
+
+def test_lookalike_hosts_are_external_links_and_linkedin_subdomains_are_not() -> None:
+    body = (
+        '<a href="https://notlinkedin.com/x">a</a> '
+        '<a href="https://linkedin.com.example.org/y">b</a> '
+        '<a href="https://es.linkedin.com/in/someone">c</a>'
+    )
+    urls = [link.url for link in _post(post_page(body=body)).links]
+    assert urls == ["https://notlinkedin.com/x", "https://linkedin.com.example.org/y"]
