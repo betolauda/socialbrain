@@ -103,3 +103,32 @@ def test_find_update_returns_the_update_entity_and_pool() -> None:
     assert parsed is not None
     assert parsed.update["entityUrn"] == _UPDATE_URN
     assert "urn:li:a:9" in parsed.pool
+
+
+def _update_for(digits: str) -> dict:
+    return {
+        **_update_entity(),
+        "entityUrn": f"urn:li:fsd_update:(urn:li:activity:{digits},FEED_DETAIL)",
+    }
+
+
+def test_find_update_with_urn_id_picks_the_matching_update() -> None:
+    page = _block({"included": [_update_for("999"), _update_for("111")]})
+
+    parsed = bpr.find_update(page, urn_id="111")
+
+    assert parsed is not None
+    assert "activity:111," in parsed.update["entityUrn"]
+
+
+def test_find_update_with_urn_id_ignores_a_strangers_update() -> None:
+    # e.g. a deleted post redirected to the feed: only other people's posts present
+    page = _block({"included": [_update_for("999")]})
+
+    assert bpr.find_update(page, urn_id="111") is None
+
+
+def test_find_update_urn_id_match_respects_digit_boundaries() -> None:
+    page = _block({"included": [_update_for("1111")]})
+
+    assert bpr.find_update(page, urn_id="111") is None

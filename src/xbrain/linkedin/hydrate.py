@@ -40,6 +40,7 @@ from xbrain.config import Config
 from xbrain.extract.browser import x_context
 from xbrain.linkedin import bpr, post
 from xbrain.linkedin.browser import is_logged_out
+from xbrain.linkedin.urn import parse_saved_item
 from xbrain.models import Content, ContentSourceFailure, Item
 from xbrain.store import load_state, load_store, save_state, save_store
 
@@ -159,9 +160,19 @@ def _record_parse_miss(item: Item, now: Callable[[], datetime]) -> None:
     )
 
 
+def _verifiable_urn_id(item: Item) -> str | None:
+    """The activity id the parsed Update must belong to; ``None`` when unverifiable.
+
+    ``article`` URNs do not appear in the Update's ``entityUrn``, so they cannot be
+    matched (the 2 known cases fall back to the first Update).
+    """
+    parsed = parse_saved_item(item.url)
+    return parsed[1] if parsed is not None and parsed[0] == "activity" else None
+
+
 def _hydrate_one(item: Item, page_html: str, now: Callable[[], datetime]) -> bool:
     """Apply one fetched page's HTML onto a stub. Returns ``True`` when hydrated."""
-    parsed = bpr.find_update(page_html)
+    parsed = bpr.find_update(page_html, urn_id=_verifiable_urn_id(item))
     if parsed is None:
         _record_parse_miss(item, now)
         return False

@@ -104,23 +104,33 @@ def build_pool(page_html: str) -> dict[str, dict]:
     return pool
 
 
-def _find_update_entity(pool: dict[str, dict]) -> dict | None:
-    """Return the single ``Update`` entity in the pool, or ``None``."""
+def _find_update_entity(pool: dict[str, dict], urn_id: str | None = None) -> dict | None:
+    """Return the ``Update`` entity in the pool, or ``None``.
+
+    With ``urn_id`` only an ``Update`` whose ``entityUrn`` embeds
+    ``urn:li:activity:<urn_id>`` qualifies: a page can carry other people's posts
+    (a redirect to the feed, related posts), and the first ``Update`` found must
+    never be assumed to be the requested one.
+    """
+    wanted = re.compile(rf"urn:li:activity:{re.escape(urn_id)}(?!\d)") if urn_id else None
     for entity in pool.values():
-        if entity.get("$type") == _UPDATE_TYPE:
+        if entity.get("$type") != _UPDATE_TYPE:
+            continue
+        if wanted is None or wanted.search(str(entity.get("entityUrn", ""))):
             return entity
     return None
 
 
-def find_update(page_html: str) -> ParsedPage | None:
+def find_update(page_html: str, urn_id: str | None = None) -> ParsedPage | None:
     """Parse a post page into a `ParsedPage`, or ``None`` when it carries no Update.
 
     ``None`` means the page had no ``com.linkedin.voyager.dash.feed.Update``
-    entity at all — a deleted post, an interstitial, or a page shape we do not
-    recognise. The hydrator records that as a ``not_found`` failure.
+    entity at all (or, with ``urn_id``, none for that post) — a deleted post, an
+    interstitial, a redirect, or a page shape we do not recognise. The hydrator
+    records that as a failure.
     """
     pool = build_pool(page_html)
-    update = _find_update_entity(pool)
+    update = _find_update_entity(pool, urn_id)
     if update is None:
         return None
     return ParsedPage(update=update, pool=pool)

@@ -239,6 +239,25 @@ def test_parse_miss_records_a_not_found_failure(tmp_path: Path) -> None:
     assert source.kind == "li_post" and source.failure_reason == "not_found"
 
 
+def test_a_strangers_post_is_never_written_onto_the_stub(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    save_store({"li-1": _stub("1")}, cfg.items_path)
+    url = "https://www.linkedin.com/feed/update/urn:li:activity:1"
+    # the page for post 1 only carries post 999 (e.g. a redirect to the feed)
+    page = _FakePage({url: _page_html(digits="999", body="Someone else's text")})
+
+    report = hydrate(
+        cfg,
+        now=_now,
+        context_factory=_factory(page),
+        sleep=lambda _s: None,
+        rng=random.Random(0),
+    )
+
+    assert report.hydrated == 0
+    assert load_store(cfg.items_path)["li-1"].text == ""
+
+
 def test_logged_out_landing_stops_the_run_and_keeps_partial_progress(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
     save_store(
