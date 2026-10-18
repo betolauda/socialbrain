@@ -32,7 +32,8 @@ from xbrain.extract.threads import expand_threads
 from xbrain.fetch import fetch_pending
 from xbrain.fetch_x import fetch_x_articles
 from xbrain.generate import generate as run_generate
-from xbrain.import_note import import_note as run_import_note, load_transcript
+from xbrain.import_note import import_note as run_import_note
+from xbrain.import_note import load_transcript
 from xbrain.media import download_all as run_media_download
 from xbrain.media import emit_summary_line as media_emit_summary_line
 from xbrain.models import ArchiveImport, Author, Item, SourceName
@@ -1310,6 +1311,8 @@ def import_note_cmd(
         summary += (
             " — sin cambios en esos; usa --force para reemplazarlos (se conservan sus slides)"
         )
+    if not report.attached:
+        summary += "; no se escribió nada"
     typer.echo(summary)
 
 

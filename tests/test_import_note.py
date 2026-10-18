@@ -266,4 +266,5 @@ def test_import_note_all_skipped_says_nothing_written_and_hints_force(tmp_path: 
 
     assert result.exit_code == 0, result.output
     assert "--force" in result.output
+    assert "no se escribió nada" in result.output
     assert "Snapshot created" not in result.output
