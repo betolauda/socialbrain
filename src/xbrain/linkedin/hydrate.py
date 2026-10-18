@@ -52,6 +52,23 @@ logger = logging.getLogger(__name__)
 # server-rendered HTML, so this is a load-settle, not a lazy-content wait.
 _SETTLE_MS = 6000
 
+# HTTP statuses LinkedIn answers with when it is rate-limiting a scraper. They stop
+# the run (never recorded on the post): hammering on only deepens the throttle.
+_THROTTLE_STATUSES = frozenset({429, 999})
+
+# Statuses that mean the post is really gone (a terminal ``not_found``).
+_GONE_STATUSES = frozenset({404, 410})
+
+# Transient failures are retried at most this many times before they stop being
+# selected (``--force`` still re-hydrates them) — otherwise a really-deleted post
+# that answers 200 with no Update would eat a slot of every run forever.
+_MAX_TRANSIENT_ATTEMPTS = 3
+
+# This many posts in a row failing to yield content (no Update, or a navigation
+# error) means LinkedIn is blocking us or the network is down, not that five
+# posts were deleted: stop the run instead of marking the queue.
+_MAX_CONSECUTIVE_MISSES = 5
+
 # `li_post` failure reasons that justify an automatic retry on the next run —
 # mirrors `xbrain.fetch._TRANSIENT_FAILURES`. Everything else (``not_found``,
 # ``forbidden``, ...) is terminal: only ``--force`` re-hydrates it.
@@ -71,6 +88,14 @@ class SessionExpiredError(RuntimeError):
     """
 
 
+class ThrottledError(RuntimeError):
+    """LinkedIn throttled (429/999) or is serving posts without content.
+
+    Like `SessionExpiredError`, raised AFTER the partial progress is persisted;
+    the post that triggered a throttle status is left untouched.
+    """
+
+
 @dataclass
 class HydrateReport:
     """Counts for the CLI summary line.
@@ -81,6 +106,8 @@ class HydrateReport:
     - ``failed``    — stubs where the page carried no parseable ``Update``
       (recorded as a ``li_post`` ``not_found`` failure).
     - ``dry_run``   — the run only reported its selection.
+    - ``stopped``   — why the loop ended early besides a logged-out landing:
+      ``"throttled"`` (429/999) or ``"blocked"`` (consecutive content misses).
     - ``session_expired`` — the loop stopped early on a logged-out landing; the
       hydrated/failed counts are the partial progress that was persisted before
       `hydrate` re-raises `SessionExpiredError`.
@@ -91,6 +118,7 @@ class HydrateReport:
     failed: int = 0
     dry_run: bool = False
     session_expired: bool = False
+    stopped: str | None = None
 
 
 def _utcnow() -> datetime:
@@ -120,6 +148,7 @@ def _needs_hydration(item: Item, force: bool) -> bool:
         return True
     return any(
         failure.failure_reason in _TRANSIENT_LI_FAILURES
+        and failure.attempts < _MAX_TRANSIENT_ATTEMPTS
         for failure in _li_post_failures(item.content)
     )
 
@@ -159,6 +188,7 @@ def _record_failure(
     now: Callable[[], datetime],
     *,
     error: str | None = None,
+    http_status: int | None = None,
 ) -> None:
     """Record a ``li_post`` failure on a stub, counting the attempt."""
     prior = _li_post_failures(item.content) if item.content is not None else []
@@ -171,15 +201,23 @@ def _record_failure(
                 url=item.url,
                 failure_reason=reason,
                 error=error,
+                http_status=http_status,
                 attempts=attempts,
             )
         ],
     )
 
 
-def _record_parse_miss(item: Item, now: Callable[[], datetime]) -> None:
-    """Record a ``li_post`` ``not_found`` failure on a stub whose page had no Update."""
-    _record_failure(item, "not_found", now)
+def _record_parse_miss(item: Item, now: Callable[[], datetime], status: int | None = None) -> None:
+    """Record why a page carried no Update for this post.
+
+    Only an explicit 404/410 is the terminal ``not_found``. Anything else (a 200
+    soft authwall / captcha, a 5xx, a redirect) is the transient ``unknown_error``
+    — retried up to `_MAX_TRANSIENT_ATTEMPTS` times — so a throttling episode
+    cannot mark the whole queue permanently dead.
+    """
+    reason: FailureReason = "not_found" if status in _GONE_STATUSES else "unknown_error"
+    _record_failure(item, reason, now, http_status=status)
 
 
 def _record_navigation_error(item: Item, exc: Exception, now: Callable[[], datetime]) -> None:
@@ -202,11 +240,13 @@ def _verifiable_urn_id(item: Item) -> str | None:
     return parsed[1] if parsed is not None and parsed[0] == "activity" else None
 
 
-def _hydrate_one(item: Item, page_html: str, now: Callable[[], datetime]) -> bool:
+def _hydrate_one(
+    item: Item, page_html: str, now: Callable[[], datetime], status: int | None = None
+) -> bool:
     """Apply one fetched page's HTML onto a stub. Returns ``True`` when hydrated."""
     parsed = bpr.find_update(page_html, urn_id=_verifiable_urn_id(item))
     if parsed is None:
-        _record_parse_miss(item, now)
+        _record_parse_miss(item, now, status)
         return False
     content = post.map_update(parsed.update, parsed)
     _apply_post_content(item, content, now)
@@ -238,28 +278,43 @@ def _run_loop(
     """
     report = HydrateReport(selected=len(items))
     page = context.new_page()
+    misses = 0
     for index, item in enumerate(items):
         if index:
             sleep(rng.uniform(min_delay, max_delay))
         try:
-            page.goto(item.url, wait_until="domcontentloaded")
+            response = page.goto(item.url, wait_until="domcontentloaded")
+            status = getattr(response, "status", None)
             page.wait_for_timeout(_SETTLE_MS)
             landed_url = page.url
-            page_html = page.content() if not is_logged_out(landed_url) else ""
+            page_html = (
+                page.content()
+                if not is_logged_out(landed_url) and status not in _THROTTLE_STATUSES
+                else ""
+            )
         except Exception as exc:  # noqa: BLE001 - one bad post must not abort the batch
             logger.warning("LinkedIn post %s: navigation failed: %s", item.id, exc)
             _record_navigation_error(item, exc, now)
             touched.append(item)
             report.failed += 1
-            continue
-        if is_logged_out(landed_url):
-            report.session_expired = True
-            break
-        touched.append(item)
-        if _hydrate_one(item, page_html, now):
-            report.hydrated += 1
+            misses += 1
         else:
-            report.failed += 1
+            if is_logged_out(landed_url):
+                report.session_expired = True
+                break
+            if status in _THROTTLE_STATUSES:
+                report.stopped = "throttled"
+                break
+            touched.append(item)
+            if _hydrate_one(item, page_html, now, status):
+                report.hydrated += 1
+                misses = 0
+            else:
+                report.failed += 1
+                misses += 1
+        if misses >= _MAX_CONSECUTIVE_MISSES:
+            report.stopped = "blocked"
+            break
     return report
 
 
@@ -340,6 +395,17 @@ def hydrate(
             save_state(state, cfg.state_path)
     typer.echo(f"li_saved: {report.hydrated} hidratados, {report.failed} fallidos")
 
+    if report.stopped == "throttled":
+        raise ThrottledError(
+            "LinkedIn está limitando las peticiones (429/999). Espera un buen rato antes de "
+            f"reintentar. ({report.hydrated} hidratados antes del corte, guardados)"
+        )
+    if report.stopped == "blocked":
+        raise ThrottledError(
+            f"{_MAX_CONSECUTIVE_MISSES} posts seguidos sin contenido: LinkedIn parece estar "
+            "bloqueando o sirviendo páginas vacías. Abre un post a mano para comprobarlo y "
+            f"reintenta más tarde. ({report.hydrated} hidratados, progreso guardado)"
+        )
     if report.session_expired:
         raise SessionExpiredError(
             "La sesión de LinkedIn ha caducado. Ejecuta `socialbrain-li login`. "

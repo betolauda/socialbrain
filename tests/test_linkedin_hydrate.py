@@ -13,6 +13,7 @@ import random
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -21,6 +22,7 @@ from xbrain.linkedin import hydrate as hydrate_mod
 from xbrain.linkedin.hydrate import (
     HydrateReport,
     SessionExpiredError,
+    ThrottledError,
     hydrate,
     items_needing_hydration,
 )
@@ -77,7 +79,9 @@ class _FakePage:
         htmls: dict[str, str],
         landed: dict[str, str] | None = None,
         raises: dict[str, BaseException] | None = None,
+        statuses: dict[str, int] | None = None,
     ) -> None:
+        self._statuses = statuses or {}
         self._htmls = htmls
         self._raises = raises or {}
         self._landed = landed or {}
@@ -85,7 +89,12 @@ class _FakePage:
         self.url = ""
         self.goto_urls: list[str] = []
 
-    def goto(self, url: str, wait_until: str | None = None) -> None:
+    def goto(self, url: str, wait_until: str | None = None):
+        status = self._statuses.get(url)
+        self._do_goto(url)
+        return SimpleNamespace(status=status) if status is not None else None
+
+    def _do_goto(self, url: str) -> None:
         self.goto_urls.append(url)
         if url in self._raises:
             raise self._raises[url]
@@ -115,12 +124,12 @@ def _factory(page: _FakePage):
     return _make
 
 
-def _cfg(tmp_path: Path):
+def _cfg(tmp_path: Path, max_per_run: int = 3):
     (tmp_path / "vault").mkdir()
     (tmp_path / "data").mkdir()
     (tmp_path / "config.toml").write_text(
         f'[paths]\nvault = "{tmp_path / "vault"}"\noutput_subdir = "k"\ndata_dir = "data"\n'
-        "[linkedin]\nmax_per_run = 3\nmin_delay_s = 20\nmax_delay_s = 20\n",
+        f"[linkedin]\nmax_per_run = {max_per_run}\nmin_delay_s = 20\nmax_delay_s = 20\n",
         encoding="utf-8",
     )
     return load_config(tmp_path)
@@ -226,10 +235,11 @@ def test_normal_post_is_hydrated_onto_the_stub(tmp_path: Path) -> None:
     assert load_config(tmp_path).repo_root == tmp_path
 
 
-def test_parse_miss_records_a_not_found_failure(tmp_path: Path) -> None:
+def test_a_404_page_without_update_records_a_terminal_not_found(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
     save_store({"li-1": _stub("1")}, cfg.items_path)
-    page = _FakePage({})  # every URL returns the "nothing here" default
+    url = "https://www.linkedin.com/feed/update/urn:li:activity:1"
+    page = _FakePage({}, statuses={url: 404})
 
     report = hydrate(
         cfg,
@@ -337,6 +347,89 @@ def test_ctrl_c_mid_run_still_persists_the_posts_already_hydrated(tmp_path: Path
     stored = load_store(cfg.items_path)
     assert stored["li-1"].text == "one"
     assert stored["li-2"].content is None  # interrupted, not failed
+
+
+@pytest.mark.parametrize("status", [429, 999])
+def test_a_throttle_status_stops_the_run_without_marking_the_post_dead(
+    tmp_path: Path, status: int
+) -> None:
+    cfg = _cfg(tmp_path)
+    u1, u2, u3 = _three_posts(cfg)
+    page = _FakePage({u1: _page_html(digits="1", body="one")}, statuses={u2: status})
+
+    with pytest.raises(ThrottledError):
+        hydrate(
+            cfg,
+            now=_now,
+            context_factory=_factory(page),
+            sleep=lambda _s: None,
+            rng=random.Random(0),
+        )
+
+    assert page.goto_urls == [u1, u2]  # stopped hammering LinkedIn
+    stored = load_store(cfg.items_path)
+    assert stored["li-1"].text == "one"
+    assert stored["li-2"].content is None  # untouched: retried on the next run
+    assert stored["li-3"].content is None
+
+
+def test_a_200_page_without_update_is_a_transient_failure_not_a_dead_post(
+    tmp_path: Path,
+) -> None:
+    cfg = _cfg(tmp_path)
+    save_store({"li-1": _stub("1")}, cfg.items_path)
+    page = _FakePage({})  # soft authwall / captcha: 200 but no Update
+
+    hydrate(
+        cfg,
+        now=_now,
+        context_factory=_factory(page),
+        sleep=lambda _s: None,
+        rng=random.Random(0),
+    )
+
+    stored = load_store(cfg.items_path)
+    failure = stored["li-1"].content.sources[0]
+    assert failure.failure_reason == "unknown_error" and failure.attempts == 1
+    assert [i.id for i in items_needing_hydration(stored, force=False)] == ["li-1"]
+
+
+def test_transient_failures_stop_being_retried_after_three_attempts() -> None:
+    def failed(attempts: int) -> Content:
+        return Content(
+            fetched_at=_NOW,
+            sources=[
+                ContentSourceFailure(
+                    kind="li_post",
+                    url="https://x.test",
+                    failure_reason="unknown_error",
+                    attempts=attempts,
+                )
+            ],
+        )
+
+    store = {"li-1": _stub("1", content=failed(2)), "li-2": _stub("2", content=failed(3))}
+    assert [i.id for i in items_needing_hydration(store, force=False)] == ["li-1"]
+    assert len(items_needing_hydration(store, force=True)) == 2
+
+
+def test_five_consecutive_misses_stop_the_run_as_probably_blocked(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path, max_per_run=10)
+    save_store({f"li-{n}": _stub(str(n), age_days=n) for n in range(1, 9)}, cfg.items_path)
+    page = _FakePage({})  # every page is a 200 with no Update
+
+    with pytest.raises(ThrottledError):
+        hydrate(
+            cfg,
+            now=_now,
+            context_factory=_factory(page),
+            sleep=lambda _s: None,
+            rng=random.Random(0),
+        )
+
+    assert len(page.goto_urls) == 5
+    stored = load_store(cfg.items_path)
+    assert sum(1 for i in stored.values() if i.content is not None) == 5
 
 
 def test_logged_out_landing_stops_the_run_and_keeps_partial_progress(tmp_path: Path) -> None:
