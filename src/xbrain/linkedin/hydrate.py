@@ -26,9 +26,11 @@ from __future__ import annotations
 import logging
 import random
 import re
+import signal
 import time
 from collections.abc import Callable
-from contextlib import AbstractContextManager
+from collections.abc import Iterator
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import urlparse
@@ -69,6 +71,8 @@ _MAX_TRANSIENT_ATTEMPTS = 3
 # error) means LinkedIn is blocking us or the network is down, not that five
 # posts were deleted: stop the run instead of marking the queue.
 _MAX_CONSECUTIVE_MISSES = 5
+# Persist progress every this many processed posts, so a killed run loses a few posts, not all.
+_CHECKPOINT_EVERY = 5
 
 # `li_post` failure reasons that justify an automatic retry on the next run —
 # mirrors `xbrain.fetch._TRANSIENT_FAILURES`. Everything else (``not_found``,
@@ -325,6 +329,7 @@ def _run_loop(
     min_delay: float,
     max_delay: float,
     touched: list[Item],
+    checkpoint: Callable[[], None] = lambda: None,
 ) -> HydrateReport:
     """Navigate to each item's URL, parse, and apply.
 
@@ -334,7 +339,8 @@ def _run_loop(
     untouched, not recorded as a failure. A navigation error on one post
     (timeout, closed target) is recorded as a transient failure on THAT post and
     the batch continues. `touched` is filled as the loop goes so the caller can
-    persist progress even when the loop is cut short by an exception.
+    persist progress even when the loop is cut short by an exception;
+    `checkpoint` is called every `_CHECKPOINT_EVERY` touched posts.
     """
     report = HydrateReport(selected=len(items))
     page = context.new_page()
@@ -372,10 +378,35 @@ def _run_loop(
             else:
                 report.failed += 1
                 misses += 1
+        if touched and len(touched) % _CHECKPOINT_EVERY == 0:
+            checkpoint()
         if misses >= _MAX_CONSECUTIVE_MISSES:
             report.stopped = "blocked"
             break
     return report
+
+
+@contextmanager
+def _sigterm_as_interrupt() -> Iterator[None]:
+    """Make SIGTERM behave like Ctrl-C for the duration of the run.
+
+    The loop's ``finally`` persists progress on a ``KeyboardInterrupt`` but a plain
+    SIGTERM kills the process without unwinding. Outside the main thread signals
+    cannot be installed, so the run proceeds unchanged there.
+    """
+
+    def _raise(_signum: int, _frame: object) -> None:
+        raise KeyboardInterrupt
+
+    try:
+        previous = signal.signal(signal.SIGTERM, _raise)
+    except ValueError:
+        yield
+        return
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 def _select(store: dict[str, Item], *, force: bool, limit: int | None, cap: int) -> list[Item]:
@@ -457,7 +488,7 @@ def hydrate(
     touched: list[Item] = []
     report: HydrateReport | None = None
     try:
-        with factory() as context:
+        with _sigterm_as_interrupt(), factory() as context:
             report = _run_loop(
                 batch,
                 context,
@@ -467,6 +498,7 @@ def hydrate(
                 min_delay=cfg.linkedin_min_delay_s,
                 max_delay=cfg.linkedin_max_delay_s,
                 touched=touched,
+                checkpoint=lambda: _save_merged(cfg, touched),
             )
     finally:
         # Persist unconditionally — an authwall, a Ctrl-C or an unexpected error

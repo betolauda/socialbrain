@@ -336,6 +336,72 @@ def test_ctrl_c_mid_run_still_persists_the_posts_already_hydrated(tmp_path: Path
     assert stored["li-2"].content is None  # interrupted, not failed
 
 
+def _many_posts(cfg, count: int) -> _FakePage:
+    save_store({f"li-{n}": _stub(str(n), age_days=n) for n in range(1, count + 1)}, cfg.items_path)
+    base = "https://www.linkedin.com/feed/update/urn:li:activity:"
+    return _FakePage(
+        {f"{base}{n}": _page_html(digits=str(n), body=f"post {n}") for n in range(1, count + 1)}
+    )
+
+
+def _hydrated_on_disk(cfg) -> int:
+    return sum(1 for i in load_store(cfg.items_path).values() if i.text)
+
+
+def test_progress_is_saved_every_few_posts_not_only_at_the_end(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path, max_per_run=12)
+    page = _many_posts(cfg, 12)
+    seen_on_disk: list[int] = []
+
+    def _spy_sleep(_s: float) -> None:  # runs before every post but the first
+        seen_on_disk.append(_hydrated_on_disk(cfg))
+
+    hydrate(
+        cfg,
+        now=_now,
+        context_factory=_factory(page),
+        sleep=_spy_sleep,
+        rng=random.Random(0),
+    )
+
+    # Before post 6 (5 done) and post 11 (10 done) the earlier posts are already on disk.
+    assert seen_on_disk[4] == 5 and seen_on_disk[9] == 10
+    assert _hydrated_on_disk(cfg) == 12
+
+
+def test_sigterm_mid_run_persists_progress_and_restores_the_handler(tmp_path: Path) -> None:
+    import os
+    import signal
+
+    # A harmless stand-in for the default disposition, so a missing handler fails the
+    # test instead of killing pytest.
+    previous = lambda *_a: None  # noqa: E731
+    original = signal.signal(signal.SIGTERM, previous)
+    try:
+        cfg = _cfg(tmp_path, max_per_run=6)
+        page = _many_posts(cfg, 6)
+        calls: list[int] = []
+
+        def _kill_on_third(_s: float) -> None:
+            calls.append(1)
+            if len(calls) == 3:
+                os.kill(os.getpid(), signal.SIGTERM)
+
+        with pytest.raises(KeyboardInterrupt):
+            hydrate(
+                cfg,
+                now=_now,
+                context_factory=_factory(page),
+                sleep=_kill_on_third,
+                rng=random.Random(0),
+            )
+
+        assert _hydrated_on_disk(cfg) == 3
+        assert signal.getsignal(signal.SIGTERM) is previous
+    finally:
+        signal.signal(signal.SIGTERM, original)
+
+
 @pytest.mark.parametrize("status", [429, 999])
 def test_a_throttle_status_stops_the_run_without_marking_the_post_dead(
     tmp_path: Path, status: int

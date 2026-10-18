@@ -208,6 +208,8 @@ Newest-first ordering: recent posts are likelier to still exist.
 5. **One bad post never aborts the batch** — a navigation error (timeout,
    closed target) is a transient `li_post` failure on that item and the loop
    continues; progress is saved in a `finally`, so Ctrl-C keeps what was done.
+   Progress is also checkpointed every 5 posts, and SIGTERM is turned into a
+   `KeyboardInterrupt` for the run, so a killed process loses at most a few posts.
    Only an explicit 404/410 with no `Update` is a terminal `not_found`; any
    other page without the post's `Update` is a transient `unknown_error`
    (retried up to 3 attempts). 429/999 stop the run (post untouched), and 5
