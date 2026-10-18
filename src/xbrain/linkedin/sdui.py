@@ -24,8 +24,9 @@ never used):
 - **author** — the first ``/in/``, ``/company/`` or ``/school/`` anchor in the card
   that carries text and is not inside the body; its name is the first ``<p><span>``.
   The page sidebar is the *viewer's* own profile, so nothing outside the card is read.
-- **media** — card images by CDN kind: ``feedshare-*`` photos; ``videocover-*`` is a
-  video's poster. Avatars (``profile-displayphoto-*``, ``company-logo*``) are ignored.
+- **media** — card images by CDN kind: ``feedshare-*`` photos and
+  ``ads-document-images_*`` document pages; ``videocover-*`` is a video's poster.
+  ``image-shrink_*`` (a link card's thumbnail) is skipped silently. Avatars (``profile-displayphoto-*``, ``company-logo*``) are ignored.
   The ``<video>`` source is a ``blob:`` URL, so a video is recorded poster-era
   (``url == thumbnail_url``, the existing convention `xbrain.video_media` already
   treats as not-downloadable) — registered as a video, never as a photo.
@@ -61,6 +62,11 @@ _PROFILE_PATH = re.compile(r"^/(in|company|school)/([^/?#]+)")
 
 # CDN image kinds that are not post content.
 _AVATAR_KINDS = ("profile-displayphoto", "profile-framedphoto", "company-logo")
+# A link card's thumbnail (the link itself is captured separately). Inferred from
+# real runs: it only appeared on posts whose sole attachment was an external link.
+_DECORATIVE_KINDS = ("image-shrink",)
+# Pages of a document / carousel post: post content, one image per page.
+_PHOTO_KINDS = ("feedshare", "ads-document-images")
 
 # Notices LinkedIn shows for a removed post, matched case-insensitively. Only the
 # Spanish one is confirmed against a capture; the others are best effort. A miss is
@@ -152,10 +158,10 @@ def _media(card: etree._Element) -> tuple[list[MediaEntry], bool, list[str]]:
         kind = (
             match.group(1) if match else ("videocover-playlist" if _PLAYLIST_POSTER in src else "?")
         )
-        if kind.startswith(_AVATAR_KINDS) or src in seen:
+        if kind.startswith(_AVATAR_KINDS + _DECORATIVE_KINDS) or src in seen:
             continue
         seen.add(src)
-        if kind.startswith("feedshare"):
+        if kind.startswith(_PHOTO_KINDS):
             media.append(MediaPhotoPending(url=src))
         elif kind.startswith("videocover"):
             cover_seen = True

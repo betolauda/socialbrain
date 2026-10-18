@@ -242,6 +242,11 @@ real capture first.
 
 ## Known limits
 
+- **Inferred image kinds.** `ads-document-images_*` (document/carousel pages) are
+  mapped as post photos; `image-shrink_*` (link-card thumbnail) is skipped silently.
+  Both come from run logs, not a seen DOM — revisit if a post shows otherwise.
+  Retry a single item with `socialbrain-li hydrate --item li-<id>` (never `--force`,
+  which re-selects everything).
 - **Do not run other commands during a hydrate.** On save the touched items are
   merged into a freshly reloaded store, so work other commands wrote meanwhile
   is kept — except an edit to an item *this run touched*, which is replaced

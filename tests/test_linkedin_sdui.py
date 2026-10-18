@@ -89,6 +89,20 @@ def test_unknown_image_kind_is_flagged_not_dropped_silently() -> None:
     assert "image:document-cover_800" in content.warnings
 
 
+def test_document_pages_are_photos_of_the_post_in_page_order() -> None:
+    pages = [img("ads-document-images_480", f"p{n}") for n in range(4)]
+    content = _post(post_page(media=pages))
+    assert [type(m) for m in content.media] == [MediaPhotoPending] * 4
+    assert [m.url.split("/")[-1].split("?")[0] for m in content.media] == ["p0", "p1", "p2", "p3"]
+    assert not content.is_unknown_component and content.warnings == []
+
+
+def test_link_card_thumbnail_is_skipped_silently() -> None:
+    content = _post(post_page(media=[img("image-shrink_160", "thumb")]))
+    assert content.media == []
+    assert not content.is_unknown_component and content.warnings == []
+
+
 def test_playlist_poster_is_the_video_cover() -> None:
     poster = '<picture class="vjs-poster"><img src="https://dms.licdn.com/playlist/vid/v2/AAAA/pp?e=1&v=beta&t=tok"></picture>'
     page = post_page(media=[poster, '<video src="blob:https://x/1"></video>'])
