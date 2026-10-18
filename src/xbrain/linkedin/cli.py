@@ -20,7 +20,7 @@ import typer
 
 from xbrain.config import Config, load_config
 from xbrain.linkedin.browser import login as run_login
-from xbrain.linkedin.hydrate import SessionExpiredError
+from xbrain.linkedin.hydrate import SessionExpiredError, ThrottledError
 from xbrain.linkedin.hydrate import hydrate as run_hydrate
 from xbrain.linkedin.saved_items import parse_saved_items
 from xbrain.models import ArchiveImport
@@ -160,6 +160,6 @@ def hydrate(
     """
     try:
         run_hydrate(_config(), limit=limit, force=force, dry_run=dry_run)
-    except SessionExpiredError as exc:
+    except (SessionExpiredError, ThrottledError) as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1) from exc

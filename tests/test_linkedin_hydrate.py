@@ -373,6 +373,44 @@ def test_a_throttle_status_stops_the_run_without_marking_the_post_dead(
     assert stored["li-3"].content is None
 
 
+def test_a_miss_records_diagnostics_without_page_payloads(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    save_store({"li-1": _stub("1")}, cfg.items_path)
+    url = "https://www.linkedin.com/feed/update/urn:li:activity:1"
+    page = _FakePage({url: _page_html(digits="999", body="Someone else's secret text")})
+
+    hydrate(
+        cfg,
+        now=_now,
+        context_factory=_factory(page),
+        sleep=lambda _s: None,
+        rng=random.Random(0),
+    )
+
+    error = load_store(cfg.items_path)["li-1"].content.sources[0].error or ""
+    assert "wanted=1" in error and "bpr_blocks=1" in error
+    assert "urn:li:activity:999" in error
+    assert "secret text" not in error
+
+
+def test_a_miss_on_a_page_without_bpr_records_its_title(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    save_store({"li-1": _stub("1")}, cfg.items_path)
+    url = "https://www.linkedin.com/feed/update/urn:li:activity:1"
+    page = _FakePage({url: "<html><head><title>Sign In | LinkedIn</title></head></html>"})
+
+    hydrate(
+        cfg,
+        now=_now,
+        context_factory=_factory(page),
+        sleep=lambda _s: None,
+        rng=random.Random(0),
+    )
+
+    error = load_store(cfg.items_path)["li-1"].content.sources[0].error or ""
+    assert "bpr_blocks=0" in error and "Sign In | LinkedIn" in error
+
+
 def test_a_200_page_without_update_is_a_transient_failure_not_a_dead_post(
     tmp_path: Path,
 ) -> None:

@@ -26,11 +26,13 @@ from __future__ import annotations
 
 import logging
 import random
+import re
 import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 import typer
 from playwright.sync_api import BrowserContext
@@ -219,7 +221,38 @@ def _record_failure(
     )
 
 
-def _record_parse_miss(item: Item, now: Callable[[], datetime], status: int | None = None) -> None:
+_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+
+
+def _describe_miss(item: Item, page_html: str, landed_url: str) -> str:
+    """Payload-free diagnostics for a page that yielded no matching Update.
+
+    The first real-account run needs to tell "LinkedIn served a wall" from "our
+    id match is wrong" without a debugger: landed path (no query), size, BPR block
+    count, the Update URNs present, the id we wanted, and — only when the page has
+    no BPR at all — its ``<title>`` (e.g. "Sign In | LinkedIn").
+    """
+    summary = bpr.page_summary(page_html)
+    parts = [
+        f"landed={urlparse(landed_url).path or '?'}",
+        f"html={len(page_html)}B",
+        f"bpr_blocks={summary.blocks}",
+        f"updates={summary.update_urns[:3]}",
+        f"wanted={_verifiable_urn_id(item)}",
+    ]
+    if summary.blocks == 0:
+        match = _TITLE_RE.search(page_html)
+        if match:
+            parts.append(f"title={' '.join(match.group(1).split())[:60]}")
+    return "; ".join(parts)
+
+
+def _record_parse_miss(
+    item: Item,
+    now: Callable[[], datetime],
+    status: int | None = None,
+    diagnostics: str | None = None,
+) -> None:
     """Record why a page carried no Update for this post.
 
     Only an explicit 404/410 is the terminal ``not_found``. Anything else (a 200
@@ -228,7 +261,7 @@ def _record_parse_miss(item: Item, now: Callable[[], datetime], status: int | No
     cannot mark the whole queue permanently dead.
     """
     reason: FailureReason = "not_found" if status in _GONE_STATUSES else "unknown_error"
-    _record_failure(item, reason, now, http_status=status)
+    _record_failure(item, reason, now, error=diagnostics, http_status=status)
 
 
 def _record_navigation_error(item: Item, exc: Exception, now: Callable[[], datetime]) -> None:
@@ -252,12 +285,16 @@ def _verifiable_urn_id(item: Item) -> str | None:
 
 
 def _hydrate_one(
-    item: Item, page_html: str, now: Callable[[], datetime], status: int | None = None
+    item: Item,
+    page_html: str,
+    now: Callable[[], datetime],
+    status: int | None = None,
+    landed_url: str = "",
 ) -> bool:
     """Apply one fetched page's HTML onto a stub. Returns ``True`` when hydrated."""
     parsed = bpr.find_update(page_html, urn_id=_verifiable_urn_id(item))
     if parsed is None:
-        _record_parse_miss(item, now, status)
+        _record_parse_miss(item, now, status, _describe_miss(item, page_html, landed_url))
         return False
     content = post.map_update(parsed.update, parsed)
     _apply_post_content(item, content, now)
@@ -317,7 +354,7 @@ def _run_loop(
                 report.stopped = "throttled"
                 break
             touched.append(item)
-            if _hydrate_one(item, page_html, now, status):
+            if _hydrate_one(item, page_html, now, status, landed_url):
                 report.hydrated += 1
                 misses = 0
             else:

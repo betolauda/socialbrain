@@ -133,3 +133,20 @@ def test_hydrate_surfaces_expired_session_as_a_clean_error(tmp_path: Path, monke
 
     assert result.exit_code == 1
     assert "Error: La sesión de LinkedIn ha caducado." in result.output
+
+
+def test_hydrate_surfaces_a_throttle_stop_as_a_clean_error(tmp_path: Path, monkeypatch) -> None:
+    _setup_repo(tmp_path, monkeypatch)
+
+    def _boom(*_args, **_kwargs):
+        from xbrain.linkedin.hydrate import ThrottledError
+
+        raise ThrottledError("LinkedIn está limitando las peticiones.")
+
+    monkeypatch.setattr("xbrain.linkedin.cli.run_hydrate", _boom)
+
+    result = runner.invoke(app, ["hydrate"])
+
+    assert result.exit_code == 1
+    assert "Error: LinkedIn está limitando las peticiones." in result.output
+    assert "Traceback" not in result.output

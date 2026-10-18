@@ -83,6 +83,29 @@ def _iter_bpr_payloads(page_html: str) -> Iterator[dict]:
             yield payload
 
 
+@dataclass(frozen=True)
+class PageSummary:
+    """Payload-free facts about a page, for diagnosing a parse miss.
+
+    Only the BPR block count and the ``Update`` entity URNs (post ids) — never
+    the payload text, which carries other people's comments and profiles.
+    """
+
+    blocks: int
+    update_urns: list[str]
+
+
+def page_summary(page_html: str) -> PageSummary:
+    """Count the BPR blocks and list the ``Update`` URNs a page carries."""
+    block_count = len(_BPR_BLOCK_RE.findall(page_html))
+    urns = [
+        str(entity.get("entityUrn"))
+        for entity in build_pool(page_html).values()
+        if entity.get("$type") == _UPDATE_TYPE
+    ]
+    return PageSummary(blocks=block_count, update_urns=urns)
+
+
 def build_pool(page_html: str) -> dict[str, dict]:
     """Merge every BPR block's ``included`` array into one ``entityUrn``-keyed dict.
 

@@ -132,3 +132,20 @@ def test_find_update_urn_id_match_respects_digit_boundaries() -> None:
     page = _block({"included": [_update_for("1111")]})
 
     assert bpr.find_update(page, urn_id="111") is None
+
+
+def test_page_summary_lists_blocks_and_update_urns_without_payloads() -> None:
+    page = _block(
+        {"included": [_update_for("999"), {"entityUrn": "urn:li:a:1"}]}, guid="1"
+    ) + _block("not json", guid="2")
+
+    summary = bpr.page_summary(page)
+
+    assert summary.blocks == 2
+    assert summary.update_urns == ["urn:li:fsd_update:(urn:li:activity:999,FEED_DETAIL)"]
+
+
+def test_page_summary_of_a_page_without_bpr_blocks() -> None:
+    summary = bpr.page_summary("<html><title>Sign In</title></html>")
+
+    assert (summary.blocks, summary.update_urns) == (0, [])
