@@ -409,9 +409,30 @@ def _sigterm_as_interrupt() -> Iterator[None]:
         signal.signal(signal.SIGTERM, previous)
 
 
-def _select(store: dict[str, Item], *, force: bool, limit: int | None, cap: int) -> list[Item]:
-    """Pick the stubs for this run: selection, then ``--limit``, then the run cap."""
-    selected = items_needing_hydration(store, force)
+def _items_by_id(store: dict[str, Item], item_ids: list[str]) -> list[Item]:
+    """The named ``li_saved`` items (deduplicated, in the order given).
+
+    Raises ``ValueError`` listing every id that is unknown or not ``li_saved``.
+    """
+    bad = [i for i in item_ids if i not in store or store[i].source != "li_saved"]
+    if bad:
+        raise ValueError(f"--item: not found among li_saved items: {', '.join(sorted(set(bad)))}")
+    return [store[i] for i in dict.fromkeys(item_ids)]
+
+
+def _select(
+    store: dict[str, Item],
+    *,
+    force: bool,
+    limit: int | None,
+    cap: int,
+    item_ids: list[str] | None = None,
+) -> list[Item]:
+    """Pick the stubs for this run: selection, then ``--limit``, then the run cap.
+
+    Named ``item_ids`` replace the selection (and imply ``force`` for just those).
+    """
+    selected = _items_by_id(store, item_ids) if item_ids else items_needing_hydration(store, force)
     if limit is not None:
         selected = selected[:limit]
     return selected[:cap]
@@ -436,6 +457,7 @@ def hydrate(
     *,
     limit: int | None = None,
     force: bool = False,
+    item_ids: list[str] | None = None,
     dry_run: bool = False,
     now: Callable[[], datetime] = _utcnow,
     context_factory: ContextFactory | None = None,
@@ -461,13 +483,17 @@ def hydrate(
     state = load_state(cfg.state_path)
 
     if dry_run:
-        selected = _select(store, force=force, limit=limit, cap=cfg.linkedin_max_per_run)
+        selected = _select(
+            store, force=force, limit=limit, cap=cfg.linkedin_max_per_run, item_ids=item_ids
+        )
         typer.echo(f"li_saved (dry-run): {len(selected)} stubs a hidratar")
         for item in selected:
             typer.echo(f"  {item.id}  {item.url}")
         return HydrateReport(selected=len(selected), dry_run=True)
 
-    batch = _select(store, force=force, limit=limit, cap=cfg.linkedin_max_per_run)
+    batch = _select(
+        store, force=force, limit=limit, cap=cfg.linkedin_max_per_run, item_ids=item_ids
+    )
     if not batch:
         typer.echo("li_saved: 0 stubs a hidratar")
         return HydrateReport()

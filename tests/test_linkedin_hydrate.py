@@ -183,6 +183,55 @@ def test_dry_run_reports_selection_and_writes_nothing(tmp_path: Path) -> None:
     assert all(item.text == "" for item in load_store(cfg.items_path).values())
 
 
+def test_item_ids_rehydrate_only_those_even_when_already_hydrated(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    done = _stub("1", content=Content(fetched_at=_now(), sources=[]))
+    done.text = "old text"
+    other_done = _stub("2", content=Content(fetched_at=_now(), sources=[]))
+    other_done.text = "untouched"
+    save_store({"li-1": done, "li-2": other_done, "li-3": _stub("3")}, cfg.items_path)
+    base = "https://www.linkedin.com/feed/update/urn:li:activity:"
+    page = _FakePage({f"{base}1": _page_html(digits="1", body="new text")})
+
+    report = hydrate(
+        cfg,
+        item_ids=["li-1"],
+        now=_now,
+        context_factory=_factory(page),
+        sleep=lambda _s: None,
+        rng=random.Random(0),
+    )
+
+    assert (report.selected, report.hydrated) == (1, 1)
+    assert page.goto_urls == [f"{base}1"]
+    stored = load_store(cfg.items_path)
+    assert stored["li-1"].text == "new text"
+    assert stored["li-2"].text == "untouched" and stored["li-3"].content is None
+
+
+@pytest.mark.parametrize("bad", ["li-404", "9"])
+def test_item_ids_unknown_or_not_linkedin_fail_before_any_snapshot(
+    tmp_path: Path, bad: str
+) -> None:
+    cfg = _cfg(tmp_path)
+    x_item = _stub("9")
+    x_item.source = "bookmark"
+    save_store({"li-1": _stub("1"), "9": x_item}, cfg.items_path)
+
+    with pytest.raises(ValueError, match="li_saved"):
+        hydrate(
+            cfg,
+            item_ids=["li-1", bad],
+            now=_now,
+            context_factory=_factory(_FakePage({})),
+            sleep=lambda _s: None,
+            rng=random.Random(0),
+        )
+
+    snapshots = cfg.data_dir / "snapshots"
+    assert not snapshots.exists() or not any(snapshots.iterdir())
+
+
 def test_limit_caps_the_batch(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
     save_store({f"li-{n}": _stub(str(n), age_days=n) for n in range(5)}, cfg.items_path)

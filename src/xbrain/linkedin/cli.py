@@ -143,6 +143,11 @@ def hydrate(
         "--force",
         help="Re-hidrata también los items ya hidratados o con un fallo terminal.",
     ),
+    item: list[str] | None = typer.Option(
+        None,
+        "--item",
+        help="Re-hidrata solo este item li-<id> (repetible), aunque ya esté hidratado.",
+    ),
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
@@ -159,7 +164,7 @@ def hydrate(
     snapshot de `data/`.
     """
     try:
-        run_hydrate(_config(), limit=limit, force=force, dry_run=dry_run)
+        run_hydrate(_config(), limit=limit, force=force, item_ids=item, dry_run=dry_run)
     except (SessionExpiredError, ThrottledError) as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
