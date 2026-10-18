@@ -71,6 +71,13 @@ pulled from upstream (`docs/UPSTREAM_SYNC.md`). The package stays named
   safe — so a persistently-failing transient link, re-fetched every run by
   `fetch_pending` (which keys on source state, not time), does not burn one identical
   LLM call per cycle.
+- Importing an external transcript: `import-note <transcript.json> --item <id>` (repeatable)
+  attaches an already-produced transcript (e.g. `video2note --json`) as an `x_video` source
+  via the same parser (`transcribe.parse_transcript`) and `attach_transcript` as `digest-video`
+  — no transcription, no new stage; the `fetched_at` bump re-triggers `enrich`. Validates
+  BEFORE writing: unknown id, an item with no video media, or a JSON with neither `text` nor
+  `segments` → error, nothing written. Skips items that already have `x_video` unless
+  `--force`, which keeps the prior source's `frames`. Destructive → auto-snapshot.
 - Video digest — visual layer (PR4, `--frames`, opt-in): for slide-heavy talks,
   `digest-video --frames` extracts key slides via **external** `ffmpeg`
   (`video_frames.py`, scene detection + interval sampling so a static tail is still

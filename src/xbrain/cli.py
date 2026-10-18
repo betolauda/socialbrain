@@ -23,7 +23,6 @@ from xbrain.describe import describe_all as run_describe_all
 from xbrain.describe import emit_summary_line as describe_emit_summary_line
 from xbrain.diff import diff_snapshots, format_json, format_text
 from xbrain.digest import VisualConfig, digest_videos, format_digest_summary
-from xbrain.import_note import import_note as run_import_note, load_transcript
 from xbrain.enrich import apply_worksheet_judgments, enrich_with_executor, items_pending_enrichment
 from xbrain.executors.api import ApiExecutor
 from xbrain.extract.browser import login as run_login
@@ -33,6 +32,7 @@ from xbrain.extract.threads import expand_threads
 from xbrain.fetch import fetch_pending
 from xbrain.fetch_x import fetch_x_articles
 from xbrain.generate import generate as run_generate
+from xbrain.import_note import import_note as run_import_note, load_transcript
 from xbrain.media import download_all as run_media_download
 from xbrain.media import emit_summary_line as media_emit_summary_line
 from xbrain.models import ArchiveImport, Author, Item, SourceName
@@ -1302,10 +1302,15 @@ def import_note_cmd(
     if report.attached:
         _auto_snapshot(cfg, "import-note")
         save_store(store, cfg.items_path)
-    typer.echo(
+    summary = (
         f"import-note: adjuntado a {len(report.attached)} item(s), "
         f"ya tenían transcript {len(report.already)}"
     )
+    if report.already:
+        summary += (
+            " — sin cambios en esos; usa --force para reemplazarlos (se conservan sus slides)"
+        )
+    typer.echo(summary)
 
 
 @app.command()
