@@ -326,6 +326,20 @@ def _select(store: dict[str, Item], *, force: bool, limit: int | None, cap: int)
     return selected[:cap]
 
 
+def _save_merged(cfg: Config, touched: list[Item]) -> None:
+    """Write only the items this run touched onto a FRESHLY loaded store.
+
+    The browser loop takes tens of minutes; saving the store loaded at the start
+    would silently discard anything another command (`fetch`, `enrich`, `media`,
+    `import-archive`) wrote meanwhile. Reloading and replacing just the touched
+    items keeps the race window down to this load→save.
+    """
+    fresh = load_store(cfg.items_path)
+    for item in touched:
+        fresh[item.id] = item
+    save_store(fresh, cfg.items_path)
+
+
 def hydrate(
     cfg: Config,
     *,
@@ -341,7 +355,8 @@ def hydrate(
 
     Loads the store, selects the stubs needing content (see
     `items_needing_hydration`), snapshots ``data/``, then drives one headful
-    browser context over the batch. The store and state are saved after the loop
+    browser context over the batch. The touched items are merged into a freshly
+    reloaded store and saved after the loop (see `_save_merged`)
     — including a loop cut short by a logged-out landing, which persists the
     partial progress and then raises `SessionExpiredError`.
 
@@ -390,8 +405,8 @@ def hydrate(
         # Persist unconditionally — an authwall, a Ctrl-C or an unexpected error
         # part-way still leaves real hydrated posts, and the snapshot was taken.
         if touched or report is not None:
+            _save_merged(cfg, touched)
             state.li_saved.last_run = now()
-            save_store(store, cfg.items_path)
             save_state(state, cfg.state_path)
     typer.echo(f"li_saved: {report.hydrated} hidratados, {report.failed} fallidos")
 

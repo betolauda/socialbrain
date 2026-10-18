@@ -432,6 +432,49 @@ def test_five_consecutive_misses_stop_the_run_as_probably_blocked(tmp_path: Path
     assert sum(1 for i in stored.values() if i.content is not None) == 5
 
 
+def test_work_saved_by_another_command_during_the_run_is_not_lost(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    u1, u2, u3 = _three_posts(cfg)
+    # a 4th stub beyond the 3-post cap: not part of this run's batch
+    store = load_store(cfg.items_path)
+    store["li-4"] = _stub("4", age_days=4)
+    save_store(store, cfg.items_path)
+
+    class _ConcurrentWriter(_FakePage):
+        """Another command rewrites items.json while the browser loop is running."""
+
+        def _do_goto(self, url: str) -> None:
+            if url == u2:
+                other = load_store(cfg.items_path)
+                other["li-4"].text = "edited by another command"
+                other["tw-1"] = Item(
+                    id="tw-1",
+                    source="bookmark",
+                    url="https://x.com/a/status/1",
+                    author=Author(handle="a", name="A"),
+                    text="added meanwhile",
+                    created_at=_NOW,
+                    captured_at=_NOW,
+                )
+                save_store(other, cfg.items_path)
+            super()._do_goto(url)
+
+    page = _ConcurrentWriter({u1: _page_html(digits="1", body="one")})
+
+    hydrate(
+        cfg,
+        now=_now,
+        context_factory=_factory(page),
+        sleep=lambda _s: None,
+        rng=random.Random(0),
+    )
+
+    stored = load_store(cfg.items_path)
+    assert stored["li-1"].text == "one"  # this run's work
+    assert stored["tw-1"].text == "added meanwhile"  # the other command's item
+    assert stored["li-4"].text == "edited by another command"  # ...and its edit
+
+
 def test_logged_out_landing_stops_the_run_and_keeps_partial_progress(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
     save_store(
