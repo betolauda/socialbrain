@@ -72,8 +72,14 @@ def _page_html(*, digits: str, body: str) -> str:
 
 
 class _FakePage:
-    def __init__(self, htmls: dict[str, str], landed: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        htmls: dict[str, str],
+        landed: dict[str, str] | None = None,
+        raises: dict[str, BaseException] | None = None,
+    ) -> None:
         self._htmls = htmls
+        self._raises = raises or {}
         self._landed = landed or {}
         self._current = ""
         self.url = ""
@@ -81,6 +87,8 @@ class _FakePage:
 
     def goto(self, url: str, wait_until: str | None = None) -> None:
         self.goto_urls.append(url)
+        if url in self._raises:
+            raise self._raises[url]
         self._current = url
         self.url = self._landed.get(url, url)
 
@@ -256,6 +264,79 @@ def test_a_strangers_post_is_never_written_onto_the_stub(tmp_path: Path) -> None
 
     assert report.hydrated == 0
     assert load_store(cfg.items_path)["li-1"].text == ""
+
+
+def _three_posts(cfg) -> tuple[str, str, str]:
+    save_store({f"li-{n}": _stub(str(n), age_days=n) for n in (1, 2, 3)}, cfg.items_path)
+    return tuple(f"https://www.linkedin.com/feed/update/urn:li:activity:{n}" for n in (1, 2, 3))
+
+
+def test_a_navigation_timeout_fails_that_post_only_and_the_batch_continues(
+    tmp_path: Path,
+) -> None:
+    from playwright.sync_api import TimeoutError as PlaywrightTimeout
+
+    cfg = _cfg(tmp_path)
+    u1, u2, u3 = _three_posts(cfg)
+    page = _FakePage(
+        {u1: _page_html(digits="1", body="one"), u3: _page_html(digits="3", body="three")},
+        raises={u2: PlaywrightTimeout("Timeout 30000ms exceeded")},
+    )
+
+    report = hydrate(
+        cfg,
+        now=_now,
+        context_factory=_factory(page),
+        sleep=lambda _s: None,
+        rng=random.Random(0),
+    )
+
+    assert (report.hydrated, report.failed) == (2, 1)
+    stored = load_store(cfg.items_path)
+    assert stored["li-1"].text == "one" and stored["li-3"].text == "three"
+    failure = stored["li-2"].content.sources[0]
+    assert isinstance(failure, ContentSourceFailure)
+    assert failure.failure_reason == "timeout"  # transient: retried next run
+    assert [i.id for i in items_needing_hydration(stored, force=False)] == ["li-2"]
+
+
+def test_an_unexpected_browser_error_is_recorded_as_a_transient_failure(
+    tmp_path: Path,
+) -> None:
+    cfg = _cfg(tmp_path)
+    u1, u2, u3 = _three_posts(cfg)
+    page = _FakePage({}, raises={u2: RuntimeError("Target closed")})
+
+    hydrate(
+        cfg,
+        now=_now,
+        context_factory=_factory(page),
+        sleep=lambda _s: None,
+        rng=random.Random(0),
+    )
+
+    failure = load_store(cfg.items_path)["li-2"].content.sources[0]
+    assert failure.failure_reason == "unknown_error"
+    assert "Target closed" in (failure.error or "")
+
+
+def test_ctrl_c_mid_run_still_persists_the_posts_already_hydrated(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    u1, u2, u3 = _three_posts(cfg)
+    page = _FakePage({u1: _page_html(digits="1", body="one")}, raises={u2: KeyboardInterrupt()})
+
+    with pytest.raises(KeyboardInterrupt):
+        hydrate(
+            cfg,
+            now=_now,
+            context_factory=_factory(page),
+            sleep=lambda _s: None,
+            rng=random.Random(0),
+        )
+
+    stored = load_store(cfg.items_path)
+    assert stored["li-1"].text == "one"
+    assert stored["li-2"].content is None  # interrupted, not failed
 
 
 def test_logged_out_landing_stops_the_run_and_keeps_partial_progress(tmp_path: Path) -> None:

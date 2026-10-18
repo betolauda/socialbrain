@@ -34,6 +34,7 @@ from datetime import datetime, timezone
 
 import typer
 from playwright.sync_api import BrowserContext
+from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
 from xbrain import snapshot
 from xbrain.config import Config
@@ -41,7 +42,7 @@ from xbrain.extract.browser import x_context
 from xbrain.linkedin import bpr, post
 from xbrain.linkedin.browser import is_logged_out
 from xbrain.linkedin.urn import parse_saved_item
-from xbrain.models import Content, ContentSourceFailure, Item
+from xbrain.models import Content, ContentSourceFailure, FailureReason, Item
 from xbrain.store import load_state, load_store, save_state, save_store
 
 logger = logging.getLogger(__name__)
@@ -152,12 +153,43 @@ def _apply_post_content(item: Item, content: post.PostContent, now: Callable[[],
     item.content = Content(fetched_at=now(), sources=[])
 
 
-def _record_parse_miss(item: Item, now: Callable[[], datetime]) -> None:
-    """Record a ``li_post`` ``not_found`` failure on a stub whose page had no Update."""
+def _record_failure(
+    item: Item,
+    reason: FailureReason,
+    now: Callable[[], datetime],
+    *,
+    error: str | None = None,
+) -> None:
+    """Record a ``li_post`` failure on a stub, counting the attempt."""
+    prior = _li_post_failures(item.content) if item.content is not None else []
+    attempts = max((failure.attempts for failure in prior), default=0) + 1
     item.content = Content(
         fetched_at=now(),
-        sources=[ContentSourceFailure(kind="li_post", url=item.url, failure_reason="not_found")],
+        sources=[
+            ContentSourceFailure(
+                kind="li_post",
+                url=item.url,
+                failure_reason=reason,
+                error=error,
+                attempts=attempts,
+            )
+        ],
     )
+
+
+def _record_parse_miss(item: Item, now: Callable[[], datetime]) -> None:
+    """Record a ``li_post`` ``not_found`` failure on a stub whose page had no Update."""
+    _record_failure(item, "not_found", now)
+
+
+def _record_navigation_error(item: Item, exc: Exception, now: Callable[[], datetime]) -> None:
+    """Record a transient failure for a post whose navigation raised.
+
+    A Playwright timeout is the routine LinkedIn failure; anything else is the
+    catch-all. Both are in `_TRANSIENT_LI_FAILURES`, so the next run retries.
+    """
+    reason: FailureReason = "timeout" if isinstance(exc, PlaywrightTimeout) else "unknown_error"
+    _record_failure(item, reason, now, error=str(exc)[:200] or type(exc).__name__)
 
 
 def _verifiable_urn_id(item: Item) -> str | None:
@@ -192,28 +224,42 @@ def _run_loop(
     rng: random.Random,
     min_delay: float,
     max_delay: float,
+    touched: list[Item],
 ) -> HydrateReport:
     """Navigate to each item's URL, parse, and apply.
 
     Stops (does not raise) on a logged-out landing, flagging
     ``report.session_expired`` — the caller persists the partial progress and
     then re-raises `SessionExpiredError`. The post that hit the wall is left
-    untouched, not recorded as a failure.
+    untouched, not recorded as a failure. A navigation error on one post
+    (timeout, closed target) is recorded as a transient failure on THAT post and
+    the batch continues. `touched` is filled as the loop goes so the caller can
+    persist progress even when the loop is cut short by an exception.
     """
     report = HydrateReport(selected=len(items))
     page = context.new_page()
     for index, item in enumerate(items):
-        page.goto(item.url, wait_until="domcontentloaded")
-        page.wait_for_timeout(_SETTLE_MS)
-        if is_logged_out(page.url):
+        if index:
+            sleep(rng.uniform(min_delay, max_delay))
+        try:
+            page.goto(item.url, wait_until="domcontentloaded")
+            page.wait_for_timeout(_SETTLE_MS)
+            landed_url = page.url
+            page_html = page.content() if not is_logged_out(landed_url) else ""
+        except Exception as exc:  # noqa: BLE001 - one bad post must not abort the batch
+            logger.warning("LinkedIn post %s: navigation failed: %s", item.id, exc)
+            _record_navigation_error(item, exc, now)
+            touched.append(item)
+            report.failed += 1
+            continue
+        if is_logged_out(landed_url):
             report.session_expired = True
             break
-        if _hydrate_one(item, page.content(), now):
+        touched.append(item)
+        if _hydrate_one(item, page_html, now):
             report.hydrated += 1
         else:
             report.failed += 1
-        if index < len(items) - 1:
-            sleep(rng.uniform(min_delay, max_delay))
     return report
 
 
@@ -271,22 +317,27 @@ def hydrate(
     factory = context_factory or (
         lambda: x_context(cfg.storage_state_for("linkedin"), headless=False)
     )
-    with factory() as context:
-        report = _run_loop(
-            batch,
-            context,
-            now=now,
-            sleep=sleep,
-            rng=rng or random.Random(),
-            min_delay=cfg.linkedin_min_delay_s,
-            max_delay=cfg.linkedin_max_delay_s,
-        )
-
-    # Persist unconditionally — a run that hit an authwall part-way still
-    # hydrated real posts, and the snapshot was already taken.
-    state.li_saved.last_run = now()
-    save_store(store, cfg.items_path)
-    save_state(state, cfg.state_path)
+    touched: list[Item] = []
+    report: HydrateReport | None = None
+    try:
+        with factory() as context:
+            report = _run_loop(
+                batch,
+                context,
+                now=now,
+                sleep=sleep,
+                rng=rng or random.Random(),
+                min_delay=cfg.linkedin_min_delay_s,
+                max_delay=cfg.linkedin_max_delay_s,
+                touched=touched,
+            )
+    finally:
+        # Persist unconditionally — an authwall, a Ctrl-C or an unexpected error
+        # part-way still leaves real hydrated posts, and the snapshot was taken.
+        if touched or report is not None:
+            state.li_saved.last_run = now()
+            save_store(store, cfg.items_path)
+            save_state(state, cfg.state_path)
     typer.echo(f"li_saved: {report.hydrated} hidratados, {report.failed} fallidos")
 
     if report.session_expired:
