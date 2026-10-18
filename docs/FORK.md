@@ -50,6 +50,7 @@ actual number here as PRs land:
 | 4 | none — all new files under `src/xbrain/linkedin/` (saved-items importer + `socialbrain-li` CLI); `pyproject.toml` console script only | **0** |
 | 7 | `media.py`, `fetch.py` | _pending_ |
 | 8 | `dashboard.py` + `resources/dashboard.template.html` | _pending, deliberately last_ |
+| — | `transcribe.py` (+9, public `parse_transcript`), `cli.py` (+37, `import-note`); new `import_note.py` — video2note integration, off the numbered PR track | **~46 net** |
 
 PRs 5, 6 (LinkedIn session handling and the hydrator) are purely additive —
 new files under `src/xbrain/linkedin/` — and are not in this table because

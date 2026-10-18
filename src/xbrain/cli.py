@@ -32,6 +32,8 @@ from xbrain.extract.threads import expand_threads
 from xbrain.fetch import fetch_pending
 from xbrain.fetch_x import fetch_x_articles
 from xbrain.generate import generate as run_generate
+from xbrain.import_note import import_note as run_import_note
+from xbrain.import_note import load_transcript
 from xbrain.media import download_all as run_media_download
 from xbrain.media import emit_summary_line as media_emit_summary_line
 from xbrain.models import ArchiveImport, Author, Item, SourceName
@@ -1269,6 +1271,49 @@ def digest_video(
         frames=frames,
         vision_model=vision_model,
     )
+
+
+@app.command(name="import-note")
+@_handle_cli_errors
+def import_note_cmd(
+    transcript_path: Path = typer.Argument(
+        ..., metavar="TRANSCRIPT_JSON", help="Ruta a un transcript.json ya generado."
+    ),
+    item: list[str] = typer.Option(
+        ...,
+        "--item",
+        help="ID del item destino. Repetible si varios bookmarks apuntan al mismo vídeo.",
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Reemplazar items que ya tienen un source x_video."
+    ),
+) -> None:
+    """Adjunta un transcript.json existente (p.ej. de video2note) como source `x_video`.
+
+    No transcribe: lee el archivo con el mismo parser que `digest-video` y lo
+    adjunta a cada `--item`, de modo que `enrich` re-enriquece solo. Falla si un id
+    no existe en `items.json` (sin escribir nada). Un transcript sin voz se adjunta
+    como dato (`has_speech=False`). Idempotente: salta items con `x_video` salvo
+    `--force`. Destructivo → auto-snapshot antes de escribir.
+    """
+    cfg = _config()
+    transcript = load_transcript(transcript_path)
+    store = load_store(cfg.items_path)
+    report = run_import_note(store, item, transcript, force=force)
+    if report.attached:
+        _auto_snapshot(cfg, "import-note")
+        save_store(store, cfg.items_path)
+    summary = (
+        f"import-note: adjuntado a {len(report.attached)} item(s), "
+        f"ya tenían transcript {len(report.already)}"
+    )
+    if report.already:
+        summary += (
+            " — sin cambios en esos; usa --force para reemplazarlos (se conservan sus slides)"
+        )
+    if not report.attached:
+        summary += "; no se escribió nada"
+    typer.echo(summary)
 
 
 @app.command()
