@@ -33,6 +33,7 @@ from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Literal
 from urllib.parse import urlparse
 
 import typer
@@ -298,8 +299,11 @@ def _hydrate_one(
     now: Callable[[], datetime],
     status: int | None = None,
     landed_url: str = "",
-) -> bool:
-    """Apply one fetched page's HTML onto a stub. Returns ``True`` when hydrated.
+) -> Literal["hydrated", "gone", "miss"]:
+    """Apply one fetched page's HTML onto a stub: ``hydrated``, ``gone`` or ``miss``.
+
+    ``gone`` is a removed post: an understood answer, so it is not evidence that
+    LinkedIn is blocking us (unlike a ``miss``).
 
     A page that is not the requested post is never written onto the stub: a removed
     post (container absent AND the notice present) is the terminal ``not_found``;
@@ -310,13 +314,13 @@ def _hydrate_one(
         _apply_post_content(item, outcome.content, now)
         for warning in outcome.content.warnings:
             logger.warning("LinkedIn post %s: %s", item.id, warning)
-        return True
+        return "hydrated"
     diagnostics = _describe_miss(item, page_html, landed_url, outcome.reason)
     if outcome.kind == "deleted":
         _record_failure(item, "not_found", now, error=diagnostics, http_status=status)
-    else:
-        _record_parse_miss(item, now, status, diagnostics)
-    return False
+        return "gone"
+    _record_parse_miss(item, now, status, diagnostics)
+    return "miss"
 
 
 def _run_loop(
@@ -372,12 +376,13 @@ def _run_loop(
                 report.stopped = "throttled"
                 break
             touched.append(item)
-            if _hydrate_one(item, page_html, now, status, landed_url):
+            result = _hydrate_one(item, page_html, now, status, landed_url)
+            if result == "hydrated":
                 report.hydrated += 1
                 misses = 0
             else:
                 report.failed += 1
-                misses += 1
+                misses = 0 if result == "gone" else misses + 1
         if touched and len(touched) % _CHECKPOINT_EVERY == 0:
             checkpoint()
         if misses >= _MAX_CONSECUTIVE_MISSES:
@@ -406,7 +411,8 @@ def _sigterm_as_interrupt() -> Iterator[None]:
     try:
         yield
     finally:
-        signal.signal(signal.SIGTERM, previous)
+        # `None` = a disposition not installed from Python; it cannot be passed back.
+        signal.signal(signal.SIGTERM, signal.SIG_DFL if previous is None else previous)
 
 
 def _items_by_id(store: dict[str, Item], item_ids: list[str]) -> list[Item]:
@@ -480,7 +486,6 @@ def hydrate(
     if limit is not None and limit < 1:
         raise ValueError(f"--limit debe ser ≥ 1 (recibido: {limit})")
     store = load_store(cfg.items_path)
-    state = load_state(cfg.state_path)
 
     if dry_run:
         selected = _select(
@@ -494,6 +499,11 @@ def hydrate(
     batch = _select(
         store, force=force, limit=limit, cap=cfg.linkedin_max_per_run, item_ids=item_ids
     )
+    omitted = len(dict.fromkeys(item_ids or [])) - len(batch) if item_ids else 0
+    if omitted > 0:
+        typer.echo(
+            f"--item: {omitted} omitidos por --limit / el tope de la corrida; repite el comando."
+        )
     if not batch:
         typer.echo("li_saved: 0 stubs a hidratar")
         return HydrateReport()
@@ -531,6 +541,8 @@ def hydrate(
         # part-way still leaves real hydrated posts, and the snapshot was taken.
         if touched or report is not None:
             _save_merged(cfg, touched)
+            # Reload: another command may have written state.json during the run.
+            state = load_state(cfg.state_path)
             state.li_saved.last_run = now()
             save_state(state, cfg.state_path)
     typer.echo(f"li_saved: {report.hydrated} hidratados, {report.failed} fallidos")

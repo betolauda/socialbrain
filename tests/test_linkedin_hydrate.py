@@ -26,7 +26,7 @@ from xbrain.linkedin.hydrate import (
     items_needing_hydration,
 )
 from xbrain.models import Author, Content, ContentSourceFailure, Item
-from xbrain.store import load_store, save_store
+from xbrain.store import load_state, load_store, save_state, save_store
 
 _NOW = datetime(2026, 9, 1, tzinfo=timezone.utc)
 
@@ -773,3 +773,90 @@ def test_nothing_to_hydrate_is_a_clean_noop(tmp_path: Path) -> None:
 
 def test_module_exposes_settle_budget() -> None:
     assert hydrate_mod._SETTLE_MS == 6000
+
+
+def test_five_removed_posts_in_a_row_do_not_look_like_a_block(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path, max_per_run=6)
+    save_store({f"li-{n}": _stub(str(n), age_days=n) for n in range(1, 7)}, cfg.items_path)
+    base = "https://www.linkedin.com/feed/update/urn:li:activity:"
+    page = _FakePage({f"{base}{n}": deleted_page() for n in range(1, 7)})
+
+    report = hydrate(
+        cfg,
+        now=_now,
+        context_factory=_factory(page),
+        sleep=lambda _s: None,
+        rng=random.Random(0),
+    )
+
+    assert len(page.goto_urls) == 6 and report.stopped is None
+
+
+def test_state_written_by_another_command_during_the_run_is_kept(tmp_path: Path) -> None:
+    from xbrain.models import ArchiveImport
+
+    cfg = _cfg(tmp_path, max_per_run=2)
+    page = _many_posts(cfg, 2)
+    save_state(load_state(cfg.state_path), cfg.state_path)
+
+    def _other_command(_s: float) -> None:
+        state = load_state(cfg.state_path)
+        state.archive_imported = ArchiveImport(file="a.zip", at=_now())
+        save_state(state, cfg.state_path)
+
+    hydrate(
+        cfg,
+        now=_now,
+        context_factory=_factory(page),
+        sleep=_other_command,
+        rng=random.Random(0),
+    )
+
+    state = load_state(cfg.state_path)
+    assert state.archive_imported is not None and state.li_saved.last_run is not None
+
+
+def test_a_sigterm_disposition_not_set_from_python_is_restored_as_default(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import signal
+
+    calls: list[object] = []
+
+    def _fake_signal(_sig, handler):
+        if handler is None:
+            raise TypeError("signal handler must be signal.SIG_IGN, signal.SIG_DFL, or a callable")
+        calls.append(handler)
+        return None  # what the OS reports for a handler not installed from Python
+
+    monkeypatch.setattr(hydrate_mod.signal, "signal", _fake_signal)
+    cfg = _cfg(tmp_path, max_per_run=1)
+
+    hydrate(
+        cfg,
+        now=_now,
+        context_factory=_factory(_many_posts(cfg, 1)),
+        sleep=lambda _s: None,
+        rng=random.Random(0),
+    )
+
+    assert calls[-1] == signal.SIG_DFL
+
+
+def test_item_ids_beyond_the_run_cap_are_reported_not_dropped_silently(
+    tmp_path: Path, capsys
+) -> None:
+    cfg = _cfg(tmp_path, max_per_run=2)
+    page = _many_posts(cfg, 3)
+
+    report = hydrate(
+        cfg,
+        item_ids=["li-1", "li-2", "li-3"],
+        now=_now,
+        context_factory=_factory(page),
+        sleep=lambda _s: None,
+        rng=random.Random(0),
+    )
+
+    assert report.selected == 2
+    assert "1 omitidos" in capsys.readouterr().out
