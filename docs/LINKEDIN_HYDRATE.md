@@ -242,6 +242,15 @@ real capture first.
 
 ## Known limits
 
+- **Re-hydrating an already-hydrated item (`--force` / `--item`) is lossy.**
+  Media and links are rebuilt from the page (photo URLs carry per-load tokens, so
+  they cannot be matched to downloaded entries), which drops downloaded-photo and
+  `describe` state; a failed re-hydrate also replaces the success bookkeeping with
+  a failure record. Fine for never-downloaded items; run `media`/`describe` again
+  afterwards. A fix is the deferred follow-up 7.
+- **Unmapped media is not retried.** A post with an unknown image kind or a
+  video without a recognised cover is stored as hydrated (text + known media) and
+  logs a warning; only `--item` brings it back.
 - **Inferred image kinds.** `ads-document-images_*` (document/carousel pages) are
   mapped as post photos; `image-shrink_*` (link-card thumbnail) is skipped silently.
   Both come from run logs, not a seen DOM — revisit if a post shows otherwise.

@@ -49,11 +49,11 @@ actual number here as PRs land:
 | 3 | `generate.py`, `rubrics.py`, `vocab.py`, `worksheet.py`, `executors/api.py`, `platforms.py` (widened) | **~117 net** (the biggest single PR — presentation was the largest gap upstream left; verified byte-identical against the real 1777-item wiki both before and after) |
 | 4 | none — all new files under `src/xbrain/linkedin/` (saved-items importer + `socialbrain-li` CLI); `pyproject.toml` console script only | **0** |
 | 5 | none — `src/xbrain/linkedin/browser.py` (LinkedIn `login` + `is_logged_out`) + a `socialbrain-li login` command; reuses `extract.browser.x_context` as-is | **0** |
-| 6 | none — all new files under `src/xbrain/linkedin/` (`bpr` + `post` + `hydrate`); `socialbrain-li hydrate` command | **0** |
+| 6 | none — all new files under `src/xbrain/linkedin/` (`sdui` DOM parser + `hydrate`); `socialbrain-li hydrate` command; `.gitignore` only (not source) | **0** |
 | 7 | `media.py`, `fetch.py` | _pending_ |
 | 8 | `dashboard.py` + `resources/dashboard.template.html` | _pending, deliberately last_ |
 
-PR 6 (the LinkedIn hydrator — `bpr.py` + `post.py` + `hydrate.py` and a
+PR 6 (the LinkedIn hydrator — `sdui.py` + `hydrate.py` and a
 `socialbrain-li hydrate` command) is purely additive: new files under
 `src/xbrain/linkedin/`, touching zero core files, same as PRs 4 and 5. It is
 listed with a **0** row above rather than omitted, so the ledger stays a
@@ -113,12 +113,11 @@ State = Annotated[_State, BeforeValidator(_promote_legacy_state)]
 
 `ARCHITECTURE.md` invariant #7 says: *"Operation names, not query ids — the
 extractor anchors to X GraphQL operation names because X rotates the ids."*
-LinkedIn's internal Voyager API has been migrating onto a GraphQL surface
-with **pinned `queryId`s** — the opposite stability profile. The LinkedIn
-hydrator's Voyager tier is therefore explicitly **opportunistic** (matches
-the coarse substring `/voyager/api/`, never a pinned id) and is the
-*secondary*, not primary, extraction path — see `docs/tutorial.md` /
-`src/xbrain/linkedin/parse.py` docstrings for the tiering. Anyone reading
+LinkedIn's internal Voyager API pins `queryId`s and, since October 2026, no
+longer serves the post at all: the hydrator parses the **rendered DOM**
+(`src/xbrain/linkedin/sdui.py`, anchored on `data-testid` / permalink
+structure — see `docs/LINKEDIN_HYDRATE.md`). That format is private and can
+change again; the parser fails safe (a transient, retried failure). Anyone reading
 the upstream invariants list should not assume #7 holds for the LinkedIn
 side of this fork.
 
