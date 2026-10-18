@@ -417,6 +417,7 @@ def test_a_removed_post_notice_without_the_container_is_a_terminal_not_found(
     stored = load_store(cfg.items_path)
     assert stored["li-1"].content.sources[0].failure_reason == "not_found"
     assert items_needing_hydration(stored, force=False) == []
+    assert "container=no" in (stored["li-1"].content.sources[0].error or "")
 
 
 def test_a_truncated_body_is_a_transient_failure_with_the_reason(tmp_path: Path) -> None:

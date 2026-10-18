@@ -220,6 +220,12 @@ def _record_failure(
     )
 
 
+# `sdui` reasons that mean the post container was never found (a removed post is
+# exactly that: no container plus the notice).
+_NO_CONTAINER_REASONS = frozenset(
+    {"container", "removed-notice-without-container", "empty-html", "unparseable-html"}
+)
+
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
 
@@ -238,7 +244,7 @@ def _describe_miss(item: Item, page_html: str, landed_url: str, reason: str) -> 
             f"reason={reason or '?'}",
             f"landed={urlparse(landed_url).path or '?'}",
             f"html={len(page_html)}B",
-            f"container={'no' if reason.startswith('container') else 'yes'}",
+            f"container={'no' if reason in _NO_CONTAINER_REASONS else 'yes'}",
             f"wanted={_verifiable_urn_id(item)}",
             f"title={title}",
         ]
