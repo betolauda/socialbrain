@@ -244,6 +244,15 @@ def _parse_output(raw: str, requested_language: str | None) -> Transcript:
     )
 
 
+def parse_transcript(raw: str, requested_language: str | None = None) -> Transcript:
+    """Public entry to parse a transcriber-format JSON document into a `Transcript`.
+
+    Lets `import-note` read a transcript produced elsewhere (video2note's
+    `transcript.json`) through the SAME parser `transcribe_media` uses.
+    """
+    return _parse_output(raw, requested_language)
+
+
 def transcribe_media(
     path: Path | str,
     *,
