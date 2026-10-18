@@ -432,6 +432,40 @@ def test_five_consecutive_misses_stop_the_run_as_probably_blocked(tmp_path: Path
     assert sum(1 for i in stored.values() if i.content is not None) == 5
 
 
+def test_missing_linkedin_session_fails_before_any_snapshot(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    save_store({"li-1": _stub("1")}, cfg.items_path)
+
+    with pytest.raises(FileNotFoundError, match="socialbrain-li login"):
+        hydrate(cfg, now=_now)  # real factory: no auth/linkedin_storage_state.json
+
+    assert not (cfg.data_dir / "snapshots").exists()
+
+
+@pytest.mark.parametrize("limit", [0, -1])
+def test_non_positive_limit_is_rejected(tmp_path: Path, limit: int) -> None:
+    cfg = _cfg(tmp_path)
+    save_store({"li-1": _stub("1")}, cfg.items_path)
+
+    with pytest.raises(ValueError, match="--limit"):
+        hydrate(cfg, limit=limit, dry_run=True, now=_now)
+
+
+def test_force_selection_goes_least_recently_hydrated_first() -> None:
+    def hydrated_at(days_ago: int) -> Content:
+        return Content(fetched_at=_NOW - timedelta(days=days_ago), sources=[])
+
+    store = {
+        "li-new": _stub("new", age_days=1, content=hydrated_at(0)),  # hydrated today
+        "li-old": _stub("old", age_days=50, content=hydrated_at(9)),  # hydrated long ago
+        "li-fresh": _stub("fresh", age_days=40),  # never attempted
+    }
+
+    forced = [i.id for i in items_needing_hydration(store, force=True)]
+
+    assert forced == ["li-fresh", "li-old", "li-new"]
+
+
 def test_work_saved_by_another_command_during_the_run_is_not_lost(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
     u1, u2, u3 = _three_posts(cfg)

@@ -154,17 +154,28 @@ def _needs_hydration(item: Item, force: bool) -> bool:
 
 
 def items_needing_hydration(store: dict[str, Item], force: bool) -> list[Item]:
-    """The ``li_saved`` stubs to hydrate, newest first.
+    """The ``li_saved`` stubs to hydrate.
 
-    Newest-first (`created_at` descending): recent posts are likelier to still
-    exist. Non-``li_saved`` items are never selected.
+    Normally newest first (`created_at` descending): recent posts are likelier to
+    still exist. Under ``force`` every ``li_saved`` item qualifies, so the order is
+    instead least-recently-attempted first (never attempted, then oldest
+    ``content.fetched_at``, newest post as the tie-break): otherwise
+    ``--force --limit N`` would re-scrape the same N newest posts on every run and
+    never reach the rest. Non-``li_saved`` items are never selected.
     """
     candidates = [
         item
         for item in store.values()
         if item.source == "li_saved" and _needs_hydration(item, force)
     ]
-    return sorted(candidates, key=lambda item: item.created_at, reverse=True)
+    newest_first = sorted(candidates, key=lambda item: item.created_at, reverse=True)
+    if not force:
+        return newest_first
+    never = datetime.min.replace(tzinfo=timezone.utc)
+    return sorted(
+        newest_first,
+        key=lambda item: item.content.fetched_at if item.content is not None else never,
+    )
 
 
 def _apply_post_content(item: Item, content: post.PostContent, now: Callable[[], datetime]) -> None:
@@ -364,6 +375,8 @@ def hydrate(
     runs under test without Playwright or real delays. ``--dry-run`` reports the
     selection and neither snapshots, navigates, nor writes.
     """
+    if limit is not None and limit < 1:
+        raise ValueError(f"--limit debe ser ≥ 1 (recibido: {limit})")
     store = load_store(cfg.items_path)
     state = load_state(cfg.state_path)
 
@@ -379,14 +392,19 @@ def hydrate(
         typer.echo("li_saved: 0 stubs a hidratar")
         return HydrateReport()
 
+    session_path = cfg.storage_state_for("linkedin")
+    if context_factory is None and not session_path.exists():
+        # Checked BEFORE the snapshot: a doomed run must have no side effect, and
+        # `x_context`'s own error would point at the X login.
+        raise FileNotFoundError(
+            f"No hay sesión de LinkedIn guardada en {session_path}. Ejecuta `socialbrain-li login`."
+        )
     path, manifest = snapshot.snapshot_create(
         cfg.data_dir, command="hydrate", dir_label="pre-hydrate"
     )
     typer.echo(f"Snapshot created: {path.name} ({manifest.item_count} items)")
 
-    factory = context_factory or (
-        lambda: x_context(cfg.storage_state_for("linkedin"), headless=False)
-    )
+    factory = context_factory or (lambda: x_context(session_path, headless=False))
     touched: list[Item] = []
     report: HydrateReport | None = None
     try:
