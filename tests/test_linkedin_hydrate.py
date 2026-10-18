@@ -7,8 +7,6 @@ reconnaissance *shape* — nothing from `linkedin_data/`.
 
 from __future__ import annotations
 
-import html
-import json
 import random
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -17,6 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.linkedin_html import deleted_page, post_page
 from xbrain.config import load_config
 from xbrain.linkedin import hydrate as hydrate_mod
 from xbrain.linkedin.hydrate import (
@@ -58,19 +57,7 @@ def _li_failure(reason: str) -> Content:
 
 
 def _page_html(*, digits: str, body: str) -> str:
-    envelope = {
-        "included": [
-            {
-                "entityUrn": f"urn:li:fsd_update:(urn:li:activity:{digits},FEED_DETAIL)",
-                "$type": "com.linkedin.voyager.dash.feed.Update",
-                "commentary": {"text": {"text": body}},
-                "actor": None,
-                "content": {"imageComponent": {"images": []}},
-            }
-        ]
-    }
-    escaped = html.escape(json.dumps(envelope))
-    return f'<code style="display: none" id="bpr-guid-1">{escaped}</code>'
+    return post_page(digits, body=body)
 
 
 class _FakePage:
@@ -388,12 +375,12 @@ def test_a_miss_records_diagnostics_without_page_payloads(tmp_path: Path) -> Non
     )
 
     error = load_store(cfg.items_path)["li-1"].content.sources[0].error or ""
-    assert "wanted=1" in error and "bpr_blocks=1" in error
-    assert "urn:li:activity:999" in error
+    assert "identity:mismatch" in error and "999" in error
+    assert "wanted=1" in error and "container=yes" in error
     assert "secret text" not in error
 
 
-def test_a_miss_on_a_page_without_bpr_records_its_title(tmp_path: Path) -> None:
+def test_a_miss_on_a_page_without_the_container_records_its_title(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
     save_store({"li-1": _stub("1")}, cfg.items_path)
     url = "https://www.linkedin.com/feed/update/urn:li:activity:1"
@@ -408,7 +395,48 @@ def test_a_miss_on_a_page_without_bpr_records_its_title(tmp_path: Path) -> None:
     )
 
     error = load_store(cfg.items_path)["li-1"].content.sources[0].error or ""
-    assert "bpr_blocks=0" in error and "Sign In | LinkedIn" in error
+    assert "container=no" in error and "Sign In | LinkedIn" in error
+
+
+def test_a_removed_post_notice_without_the_container_is_a_terminal_not_found(
+    tmp_path: Path,
+) -> None:
+    cfg = _cfg(tmp_path)
+    save_store({"li-1": _stub("1")}, cfg.items_path)
+    url = "https://www.linkedin.com/feed/update/urn:li:activity:1"
+    page = _FakePage({url: deleted_page()})  # HTTP 200, like the real removed-post page
+
+    hydrate(
+        cfg,
+        now=_now,
+        context_factory=_factory(page),
+        sleep=lambda _s: None,
+        rng=random.Random(0),
+    )
+
+    stored = load_store(cfg.items_path)
+    assert stored["li-1"].content.sources[0].failure_reason == "not_found"
+    assert items_needing_hydration(stored, force=False) == []
+
+
+def test_a_truncated_body_is_a_transient_failure_with_the_reason(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    save_store({"li-1": _stub("1")}, cfg.items_path)
+    url = "https://www.linkedin.com/feed/update/urn:li:activity:1"
+    page = _FakePage({url: post_page("1", truncated=True)})
+
+    hydrate(
+        cfg,
+        now=_now,
+        context_factory=_factory(page),
+        sleep=lambda _s: None,
+        rng=random.Random(0),
+    )
+
+    stored = load_store(cfg.items_path)
+    source = stored["li-1"].content.sources[0]
+    assert source.failure_reason == "unknown_error" and "truncated_body" in (source.error or "")
+    assert stored["li-1"].text == ""  # a fragment is never stored as the post
 
 
 def test_a_200_page_without_update_is_a_transient_failure_not_a_dead_post(

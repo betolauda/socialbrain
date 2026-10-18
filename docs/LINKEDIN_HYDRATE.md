@@ -5,6 +5,36 @@ capture of 7 saved posts (2026-09-07), not against assumptions — see
 *Reconnaissance* below. Read `docs/FORK.md` first for the divergence discipline
 and the LinkedIn risk posture this answers to.
 
+> **Superseded in part — 2026-10-18.** The BPR/Voyager format described under
+> *Reconnaissance* below **stopped being served within ~6 weeks** of the capture:
+> the first real run found 161 KB of HTML with no `bpr-guid` block, and no
+> `/voyager/api/` response carrying the post either. LinkedIn now serves a
+> server-driven-UI page (`data-sdui-screen=…feed.UpdateDetail`) and the post
+> exists only as rendered DOM. Extraction was rebuilt on that DOM
+> (`src/xbrain/linkedin/sdui.py`); `bpr.py` and `post.py` were deleted. The
+> reconnaissance section is kept as history, not as a description of the code.
+> **Lesson:** a private LinkedIn page format is not a stable interface — what
+> broke was found in ONE `--limit 1` run because every miss records a
+> payload-free diagnostic (reason, landed path, size, container presence, title)
+> in the failure's `error` field. Keep that.
+>
+> How the DOM parser anchors (all read off 6 real captures; class names are
+> obfuscated and never used): the container is the element whose `data-testid`
+> contains `commentList` (post card first, then reactions and comments); identity
+> is "every `/feed/update/urn:li:activity:<id>/` anchor in the container carries
+> exactly the requested id" (the reactions `data-testid` is a `ugcPost` id for
+> some posts, so it is not used); the body is the card's first
+> `expandable-text-box` (the DOM holds the full text even when clamped — an
+> `expandable-text-button` inside the card means truncated and the page is
+> rejected); the author is the first profile anchor with text inside the card (the
+> sidebar is the *viewer's* profile); photos are `feedshare-*` CDN images; a
+> video's `<video>` is a `blob:` URL, so it is recorded poster-era (`url ==
+> thumbnail_url`) — a video with its cover, not a photo; external links come
+> wrapped in `/safety/go/?url=…`. A removed post is a terminal `not_found` only
+> when the container is absent AND a removal notice is present (es confirmed; en/pt
+> best effort — a miss is the safe, transient direction).
+> Not yet seen: documents, polls, reshares, articles, a native external-link card.
+
 PR4 imports `Saved_Items*.csv` into 751 empty `li_saved` stubs. PR5 adds the
 session. This is the step that fills the stubs in.
 
@@ -61,25 +91,23 @@ socialbrain-li hydrate [--limit N] [--force] [--dry-run]
        ├─ page.goto(item.url); settle
        ├─ is_logged_out(page.url)?  → STOP the loop; persist what hydrated; raise (session died, not a 404)
        ├─ html = page.content()
-       ├─ update = bpr.find_update(html)          ← pure
-       ├─ apply post.map_update(update) onto the item   ← pure
+       ├─ outcome = sdui.parse_page(html, activity_id)   ← pure (post / deleted / unrecognized)
+       ├─ apply the PostContent onto the item            ← pure
        └─ sleep(random(min_delay_s, max_delay_s))
 ```
 
 ### Files (all new — zero core divergence)
 
 ```
-src/xbrain/linkedin/bpr.py       HTML → merged Voyager entity pool + `*` resolution   PURE
-src/xbrain/linkedin/post.py      Update entity → (text, author, media, links)          PURE
+src/xbrain/linkedin/sdui.py      rendered DOM → PageOutcome (post/deleted/unrecognized) PURE
 src/xbrain/linkedin/hydrate.py   the browser loop, pacing, guardrails, store writes
 src/xbrain/linkedin/cli.py       + the `hydrate` command                              (edit)
-tests/test_linkedin_bpr.py
-tests/test_linkedin_post.py
+tests/test_linkedin_sdui.py      + tests/linkedin_html.py (synthetic page builder)
 tests/test_linkedin_hydrate.py
 ```
 
-The `bpr.py` / `post.py` split is deliberate: **everything that can be wrong is
-pure and testable without a browser.** The browser shell is a thin loop with no
+The pure-parser / browser-loop split is deliberate: **everything that can be wrong
+is pure and testable without a browser.** The browser shell is a thin loop with no
 parsing logic in it.
 
 ## The rendering trap — and what it settles
@@ -184,28 +212,27 @@ Newest-first ordering: recent posts are likelier to still exist.
    other page without the post's `Update` is a transient `unknown_error`
    (retried up to 3 attempts). 429/999 stop the run (post untouched), and 5
    consecutive misses stop it as "probably blocked" (`ThrottledError`).
-6. **Never persist raw BPR payloads.** They carry other people's comments,
+6. **Never persist raw page payloads.** They carry other people's comments,
    profiles and PII. Parse in memory, keep only the mapped fields.
 
 ## Testing
 
 Repo convention: every module gets `tests/test_*.py`.
 
-- `bpr.py`: block extraction from constructed HTML, HTML-entity unescaping,
-  merging `included` across blocks, `*`-reference resolution, a block that is
-  not JSON (skipped, never raises), no `Update` present (returns `None`).
-- `post.py`: text extraction; author handle parsed out of the profile URL;
-  1-image and 7-image posts; a video post resolving `*videoPlayMetadata` to the
-  highest-bitrate mp4; `EXTERNAL_FULL` yielding a `Link` and no `li_post`
-  source; an unknown component degrading to text-only; a missing `commentary`.
+- `sdui.py`: text (with `<br>` line breaks); author from the post card and NOT
+  the viewer's sidebar (person and company); photos by CDN kind without avatars;
+  a video as poster-era; unknown image kinds flagged; `/safety/go/` unwrapping and
+  mention/hashtag exclusion; identity (a `ugcPost` reactions id is fine, another
+  activity id or no permalink is rejected); a truncated body rejected; a removed
+  post needing BOTH the missing container and the notice (es/en/pt).
 - `hydrate.py`: selection/resume logic (pure, no browser) — transient retried,
   terminal skipped, `--force` overriding; `max_per_run` respected; a
   logged-out landing stopping the loop, persisting the posts hydrated before it,
   leaving the offending post untouched, and re-raising; delays drawn from config
   bounds.
 
-**Fixtures are constructed inline, from the *shapes* recorded during
-reconnaissance — never copied from `linkedin_data/`,** which holds real
+**Fixtures are synthetic (`tests/linkedin_html.py`), modelled on the *structure* of the
+captures — never copied from `linkedin_data/`,** which holds real
 personal data of third parties (guardrail 6). Note the honest consequence,
 the same caveat `FORK.md` carries for `#39 PR2/PR3`: constructed fixtures are
 not a production guarantee. Unlike that work, the shapes here were read off a
@@ -217,11 +244,12 @@ real capture first.
   merged into a freshly reloaded store, so work other commands wrote meanwhile
   is kept — except an edit to an item *this run touched*, which is replaced
   wholesale by the run's copy. The window is small, not zero.
-- **`article` URNs (2 of 751) cannot be matched** to their `Update` (the id is not
-  in its `entityUrn`), so they take the first `Update` on the page.
-- Unvalidated against a real account as of PR6 fixes: the activity-id match and the
-  429/999 handling depend on how LinkedIn really answers. First run:
-  `socialbrain-li hydrate --limit 5`, then check the 5 items.
+- **`article` URNs (2 of 751)** are not activity ids, so the identity check is
+  skipped for them (no way to verify the page is the requested one).
+- **Not yet validated end-to-end against a real account on the DOM parser** until
+  `socialbrain-li hydrate --limit 5` is run and the 5 items reviewed by hand.
+- **Video posts** get text + the cover only (the stream is a `blob:` URL); fetching
+  the real stream would mean intercepting the player's network requests.
 - Follow-ups not in this PR: external-link shares are never fetched (their
   `Content` has no sources, so `fetch` skips them), `--force` resets downloaded
   media to pending, and mention/hashtag ranges become internal linkedin.com links.

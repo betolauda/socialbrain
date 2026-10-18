@@ -2,8 +2,7 @@
 
 ``socialbrain-li import-saved`` creates empty ``li_saved`` stubs from the data
 export. This stage drives a headful browser over the ones that still need
-content, parses each post page in memory (`xbrain.linkedin.bpr` +
-`xbrain.linkedin.post`), and writes the mapped fields back onto the stub.
+content, parses each post page in memory (`xbrain.linkedin.sdui`), and writes the mapped fields back onto the stub.
 
 Design (docs/LINKEDIN_HYDRATE.md):
 
@@ -41,7 +40,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeout
 from xbrain import snapshot
 from xbrain.config import Config
 from xbrain.extract.browser import x_context
-from xbrain.linkedin import bpr, post
+from xbrain.linkedin import sdui
 from xbrain.linkedin.browser import is_logged_out
 from xbrain.linkedin.urn import parse_saved_item
 from xbrain.models import Content, ContentSourceFailure, FailureReason, Item
@@ -180,7 +179,7 @@ def items_needing_hydration(store: dict[str, Item], force: bool) -> list[Item]:
     )
 
 
-def _apply_post_content(item: Item, content: post.PostContent, now: Callable[[], datetime]) -> None:
+def _apply_post_content(item: Item, content: sdui.PostContent, now: Callable[[], datetime]) -> None:
     """Write a mapped `PostContent` onto a stub.
 
     The body lives in ``item.text`` (not a content source — see the
@@ -224,27 +223,26 @@ def _record_failure(
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
 
-def _describe_miss(item: Item, page_html: str, landed_url: str) -> str:
-    """Payload-free diagnostics for a page that yielded no matching Update.
+def _describe_miss(item: Item, page_html: str, landed_url: str, reason: str) -> str:
+    """Payload-free diagnostics for a page that did not yield the requested post.
 
-    The first real-account run needs to tell "LinkedIn served a wall" from "our
-    id match is wrong" without a debugger: landed path (no query), size, BPR block
-    count, the Update URNs present, the id we wanted, and — only when the page has
-    no BPR at all — its ``<title>`` (e.g. "Sign In | LinkedIn").
+    The next LinkedIn change must be diagnosable from one run: which anchor is
+    missing or contradicts (``reason``), the landed path (no query), the HTML size,
+    whether the post container exists, the id we wanted and the page ``<title>``
+    (e.g. "Sign In | LinkedIn"). Never any page text.
     """
-    summary = bpr.page_summary(page_html)
-    parts = [
-        f"landed={urlparse(landed_url).path or '?'}",
-        f"html={len(page_html)}B",
-        f"bpr_blocks={summary.blocks}",
-        f"updates={summary.update_urns[:3]}",
-        f"wanted={_verifiable_urn_id(item)}",
-    ]
-    if summary.blocks == 0:
-        match = _TITLE_RE.search(page_html)
-        if match:
-            parts.append(f"title={' '.join(match.group(1).split())[:60]}")
-    return "; ".join(parts)
+    match = _TITLE_RE.search(page_html)
+    title = " ".join(match.group(1).split())[:60] if match else "?"
+    return "; ".join(
+        [
+            f"reason={reason or '?'}",
+            f"landed={urlparse(landed_url).path or '?'}",
+            f"html={len(page_html)}B",
+            f"container={'no' if reason.startswith('container') else 'yes'}",
+            f"wanted={_verifiable_urn_id(item)}",
+            f"title={title}",
+        ]
+    )
 
 
 def _record_parse_miss(
@@ -291,16 +289,24 @@ def _hydrate_one(
     status: int | None = None,
     landed_url: str = "",
 ) -> bool:
-    """Apply one fetched page's HTML onto a stub. Returns ``True`` when hydrated."""
-    parsed = bpr.find_update(page_html, urn_id=_verifiable_urn_id(item))
-    if parsed is None:
-        _record_parse_miss(item, now, status, _describe_miss(item, page_html, landed_url))
-        return False
-    content = post.map_update(parsed.update, parsed)
-    _apply_post_content(item, content, now)
-    if content.is_unknown_component:
-        logger.warning("LinkedIn post %s hydrated as text-only (unknown component)", item.id)
-    return True
+    """Apply one fetched page's HTML onto a stub. Returns ``True`` when hydrated.
+
+    A page that is not the requested post is never written onto the stub: a removed
+    post (container absent AND the notice present) is the terminal ``not_found``;
+    anything else unrecognised is a transient failure carrying the reason.
+    """
+    outcome = sdui.parse_page(page_html, _verifiable_urn_id(item))
+    if outcome.kind == "post" and outcome.content is not None:
+        _apply_post_content(item, outcome.content, now)
+        for warning in outcome.content.warnings:
+            logger.warning("LinkedIn post %s: %s", item.id, warning)
+        return True
+    diagnostics = _describe_miss(item, page_html, landed_url, outcome.reason)
+    if outcome.kind == "deleted":
+        _record_failure(item, "not_found", now, error=diagnostics, http_status=status)
+    else:
+        _record_parse_miss(item, now, status, diagnostics)
+    return False
 
 
 def _run_loop(
