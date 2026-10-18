@@ -177,8 +177,13 @@ Newest-first ordering: recent posts are likelier to still exist.
    session problem is the single worst failure mode in this design.
 4. **Auto-snapshot before the first write** (mirrors `refresh-media`,
    `digest-video`). A snapshot that cannot be taken aborts the run.
-5. **One bad post never aborts the batch** — a parse miss is a logged failure
-   on that item; the loop continues.
+5. **One bad post never aborts the batch** — a navigation error (timeout,
+   closed target) is a transient `li_post` failure on that item and the loop
+   continues; progress is saved in a `finally`, so Ctrl-C keeps what was done.
+   Only an explicit 404/410 with no `Update` is a terminal `not_found`; any
+   other page without the post's `Update` is a transient `unknown_error`
+   (retried up to 3 attempts). 429/999 stop the run (post untouched), and 5
+   consecutive misses stop it as "probably blocked" (`ThrottledError`).
 6. **Never persist raw BPR payloads.** They carry other people's comments,
    profiles and PII. Parse in memory, keep only the mapped fields.
 
@@ -205,6 +210,21 @@ personal data of third parties (guardrail 6). Note the honest consequence,
 the same caveat `FORK.md` carries for `#39 PR2/PR3`: constructed fixtures are
 not a production guarantee. Unlike that work, the shapes here were read off a
 real capture first.
+
+## Known limits
+
+- **Do not run other commands during a hydrate.** On save the touched items are
+  merged into a freshly reloaded store, so work other commands wrote meanwhile
+  is kept — except an edit to an item *this run touched*, which is replaced
+  wholesale by the run's copy. The window is small, not zero.
+- **`article` URNs (2 of 751) cannot be matched** to their `Update` (the id is not
+  in its `entityUrn`), so they take the first `Update` on the page.
+- Unvalidated against a real account as of PR6 fixes: the activity-id match and the
+  429/999 handling depend on how LinkedIn really answers. First run:
+  `socialbrain-li hydrate --limit 5`, then check the 5 items.
+- Follow-ups not in this PR: external-link shares are never fetched (their
+  `Content` has no sources, so `fetch` skips them), `--force` resets downloaded
+  media to pending, and mention/hashtag ranges become internal linkedin.com links.
 
 ## Open questions
 
