@@ -19,6 +19,9 @@ from pathlib import Path
 import typer
 
 from xbrain.config import Config, load_config
+from xbrain.linkedin.browser import login as run_login
+from xbrain.linkedin.hydrate import SessionExpiredError, ThrottledError
+from xbrain.linkedin.hydrate import hydrate as run_hydrate
 from xbrain.linkedin.saved_items import parse_saved_items
 from xbrain.models import ArchiveImport
 from xbrain.store import load_state, load_store, merge_items, save_state, save_store
@@ -72,6 +75,17 @@ def _handle_cli_errors(func: Callable) -> Callable:
     return wrapper
 
 
+@app.command()
+@_handle_cli_errors
+def login() -> None:
+    """Abre un navegador para iniciar sesión en LinkedIn y guarda la sesión.
+
+    La sesión se guarda en `auth/linkedin_storage_state.json` (gitignored),
+    separada de la de X. Re-ejecuta esto cuando la sesión caduque.
+    """
+    run_login(_config().storage_state_for("linkedin"))
+
+
 @app.command(name="import-saved")
 @_handle_cli_errors
 def import_saved(
@@ -114,3 +128,43 @@ def import_saved(
     save_store(store, cfg.items_path)
     save_state(state, cfg.state_path)
     typer.echo(f"li_saved: {added} nuevos items")
+
+
+@app.command()
+@_handle_cli_errors
+def hydrate(
+    limit: int | None = typer.Option(
+        None,
+        "--limit",
+        help="Hidrata solo los primeros N stubs seleccionados (los más recientes).",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Re-hidrata también los items ya hidratados o con un fallo terminal.",
+    ),
+    item: list[str] | None = typer.Option(
+        None,
+        "--item",
+        help="Re-hidrata solo este item li-<id> (repetible), aunque ya esté hidratado.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Muestra qué stubs se hidratarían y no navega ni escribe nada.",
+    ),
+) -> None:
+    """Rellena los stubs `li_saved` importados con el contenido real de cada post.
+
+    Abre un navegador visible (headful — se espera que haya una persona
+    delante), navega a cada post guardado que aún no tiene contenido, extrae
+    texto / autor / imágenes / vídeo / enlaces del HTML renderizado y los
+    escribe sobre el stub. Reanudable: cada ejecución sabe dónde quedó la
+    anterior solo a partir del store. Antes de la primera escritura se crea un
+    snapshot de `data/`.
+    """
+    try:
+        run_hydrate(_config(), limit=limit, force=force, item_ids=item, dry_run=dry_run)
+    except (SessionExpiredError, ThrottledError) as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc

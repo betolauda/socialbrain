@@ -106,3 +106,47 @@ def test_missing_file_reports_clean_error(tmp_path: Path, monkeypatch) -> None:
     result = runner.invoke(app, ["import-saved", str(tmp_path / "nope.csv")])
     assert result.exit_code == 1
     assert "Error:" in result.output
+
+
+def test_hydrate_dry_run_reports_selection(tmp_path: Path, monkeypatch) -> None:
+    _setup_repo(tmp_path, monkeypatch)
+    export = _export_csv(tmp_path, "7495649402552913920")
+    runner.invoke(app, ["import-saved", str(export)])
+
+    result = runner.invoke(app, ["hydrate", "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "li_saved (dry-run): 1 stubs a hidratar" in result.output
+
+
+def test_hydrate_surfaces_expired_session_as_a_clean_error(tmp_path: Path, monkeypatch) -> None:
+    _setup_repo(tmp_path, monkeypatch)
+
+    def _boom(*_args, **_kwargs):
+        from xbrain.linkedin.hydrate import SessionExpiredError
+
+        raise SessionExpiredError("La sesión de LinkedIn ha caducado.")
+
+    monkeypatch.setattr("xbrain.linkedin.cli.run_hydrate", _boom)
+
+    result = runner.invoke(app, ["hydrate"])
+
+    assert result.exit_code == 1
+    assert "Error: La sesión de LinkedIn ha caducado." in result.output
+
+
+def test_hydrate_surfaces_a_throttle_stop_as_a_clean_error(tmp_path: Path, monkeypatch) -> None:
+    _setup_repo(tmp_path, monkeypatch)
+
+    def _boom(*_args, **_kwargs):
+        from xbrain.linkedin.hydrate import ThrottledError
+
+        raise ThrottledError("LinkedIn está limitando las peticiones.")
+
+    monkeypatch.setattr("xbrain.linkedin.cli.run_hydrate", _boom)
+
+    result = runner.invoke(app, ["hydrate"])
+
+    assert result.exit_code == 1
+    assert "Error: LinkedIn está limitando las peticiones." in result.output
+    assert "Traceback" not in result.output

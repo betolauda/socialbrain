@@ -1,0 +1,288 @@
+# LINKEDIN_HYDRATE.md — PR6 spec: hydrating LinkedIn saved posts
+
+**Status: spec, not yet implemented.** Designed against a real reconnaissance
+capture of 7 saved posts (2026-09-07), not against assumptions — see
+*Reconnaissance* below. Read `docs/FORK.md` first for the divergence discipline
+and the LinkedIn risk posture this answers to.
+
+> **Superseded in part — 2026-10-18.** The BPR/Voyager format described under
+> *Reconnaissance* below **stopped being served within ~6 weeks** of the capture:
+> the first real run found 161 KB of HTML with no `bpr-guid` block, and no
+> `/voyager/api/` response carrying the post either. LinkedIn now serves a
+> server-driven-UI page (`data-sdui-screen=…feed.UpdateDetail`) and the post
+> exists only as rendered DOM. Extraction was rebuilt on that DOM
+> (`src/xbrain/linkedin/sdui.py`); `bpr.py` and `post.py` were deleted. The
+> reconnaissance section is kept as history, not as a description of the code.
+> **Lesson:** a private LinkedIn page format is not a stable interface — what
+> broke was found in ONE `--limit 1` run because every miss records a
+> payload-free diagnostic (reason, landed path, size, container presence, title)
+> in the failure's `error` field. Keep that.
+>
+> How the DOM parser anchors (all read off 6 real captures; class names are
+> obfuscated and never used): the container is the element whose `data-testid`
+> contains `commentList` (post card first, then reactions and comments); identity
+> is "every `/feed/update/urn:li:activity:<id>/` anchor in the container carries
+> exactly the requested id" (the reactions `data-testid` is a `ugcPost` id for
+> some posts, so it is not used); the body is the card's first
+> `expandable-text-box` (the DOM holds the full text even when clamped — an
+> `expandable-text-button` inside the card means truncated and the page is
+> rejected); the author is the first profile anchor with text inside the card (the
+> sidebar is the *viewer's* profile); photos are `feedshare-*` CDN images; a
+> video's `<video>` is a `blob:` URL, so it is recorded poster-era (`url ==
+> thumbnail_url`) — a video with its cover, not a photo; external links come
+> wrapped in `/safety/go/?url=…`. A removed post is a terminal `not_found` only
+> when the container is absent AND a removal notice is present (es confirmed; en/pt
+> best effort — a miss is the safe, transient direction).
+> Not yet seen: documents, polls, reshares, articles, a native external-link card.
+
+PR4 imports `Saved_Items*.csv` into 751 empty `li_saved` stubs. PR5 adds the
+session. This is the step that fills the stubs in.
+
+## Reconnaissance: what a LinkedIn post page actually serves
+
+Seven saved items were captured with a headful browser and a live session
+(1 text+image post, 4 random `activity` posts, 2 `article` items).
+
+**The post is not delivered by an XHR.** Across 35 intercepted
+`/voyager/api/` responses on the first capture, **none** carried the post —
+they were comments, social counts, notifications, presence. The post model is
+server-side-rendered into the initial HTML inside
+`<code style="display:none" id="bpr-guid-NNNNNN">` blocks (LinkedIn's BigPipe
+rendering), as standard Voyager JSON: `{data, meta, included}`.
+
+This is *better* than the interception design assumed. No scroll triggers, no
+lazy-load timing, no race. `goto` → settle → `page.content()` → parse.
+
+### The shape, measured
+
+Each capture had ~9 `bpr-guid` blocks; exactly one carried a
+`com.linkedin.voyager.dash.feed.Update` in its `included`. Merging the
+`included` arrays of every block gives ~104 entities keyed by `entityUrn`.
+
+**Fields prefixed with `*` are URN references**, not inline data — they
+resolve against that merged pool (standard Voyager denormalisation). E.g.
+`linkedInVideoComponent["*videoPlayMetadata"] = "urn:li:digitalmediaAsset:…"`
+resolves to a `VideoPlayMetadata` entity elsewhere in `included`.
+
+| Path on `Update` | Seen in | Content |
+|---|---|---|
+| `commentary.text.text` | 6/7 | Post body, plain text with `\n`. `commentary.text.attributes[]` carries mentions/hashtags/links as `{start, length, …}` ranges — empty in all 7 samples, but the field exists. |
+| `actor.name.text` | activity posts | Display name (`"Ruben Hassid"`). Empty on `articleComponent` items. |
+| `actor.navigationContext.actionTarget` | activity posts | `https://www.linkedin.com/in/<handle>?…` → the handle. |
+| `content.imageComponent.images[]` | 4/7 | **1 to 7 images** (a "carousel" is just multi-image, not a separate component). Each: `detailData.vectorImage.rootUrl` + `artifacts[]` (6 widths; `fileIdentifyingUrlPathSegment` is a signed path, `expiresAt` ≈ 2027). Full URL = `rootUrl + fileIdentifyingUrlPathSegment`. `accessibilityText` is generic boilerplate ("Ver imagen", "Shared from Hypefury") — not real alt text. |
+| `content.linkedInVideoComponent` | 1/7 | `*videoPlayMetadata` → `VideoPlayMetadata`: `progressiveStreams[].streamingLocations[].url` (signed mp4), `adaptiveStreams` (HLS), `thumbnail`, `duration` (ms), `aspectRatio`. |
+| `content.articleComponent` (`type: "EXTERNAL_FULL"`) | 2/7 | **An external link share, not a native article.** `navigationContext.actionTarget` is the real external URL; `title` / `subtitle` (domain) / `description`. `commentary` and `actor` are both empty. |
+| `entityUrn` | all | `urn:li:fsd_update:(urn:li:activity:<ID>,FEED_DETAIL,…)` — carries the id, so a parsed page can be matched back to its stub. |
+
+**Not yet seen** (7 samples is not the corpus): `documentComponent` (PDF /
+slides), `resharedUpdate` (repost), polls, celebrations. `content` is a union
+of ~30 nullable components; at most one is non-null per post.
+
+## The design
+
+```
+socialbrain-li hydrate [--limit N] [--force] [--dry-run]
+  │
+  ├─ auto-snapshot data/  (mutates items in place — mirrors refresh-media)
+  ├─ select stubs needing hydration (see Resume, below)
+  ├─ x_context(storage_state_for("linkedin"), headless=False)
+  │
+  └─ for each item, up to cfg.linkedin_max_per_run:
+       ├─ page.goto(item.url); settle
+       ├─ is_logged_out(page.url)?  → STOP the loop; persist what hydrated; raise (session died, not a 404)
+       ├─ html = page.content()
+       ├─ outcome = sdui.parse_page(html, activity_id)   ← pure (post / deleted / unrecognized)
+       ├─ apply the PostContent onto the item            ← pure
+       └─ sleep(random(min_delay_s, max_delay_s))
+```
+
+### Files (all new — zero core divergence)
+
+```
+src/xbrain/linkedin/sdui.py      rendered DOM → PageOutcome (post/deleted/unrecognized) PURE
+src/xbrain/linkedin/hydrate.py   the browser loop, pacing, guardrails, store writes
+src/xbrain/linkedin/cli.py       + the `hydrate` command                              (edit)
+tests/test_linkedin_sdui.py      + tests/linkedin_html.py (synthetic page builder)
+tests/test_linkedin_hydrate.py
+```
+
+The pure-parser / browser-loop split is deliberate: **everything that can be wrong
+is pure and testable without a browser.** The browser shell is a thin loop with no
+parsing logic in it.
+
+## The rendering trap — and what it settles
+
+`generate._render_note` renders **both**:
+
+```python
+lines += [f"## {platform.post_heading}", "", item.text, ""]   # generate.py:589
+...
+if item.content:
+    lines += _content_lines(item.content, strings)             # generate.py:600
+```
+
+So writing the body into `item.text` **and** into a
+`ContentSourceSuccess(kind="li_post", text=body)` prints it **twice** in the
+note. And `ContentSourceSuccess.text` is required — an "empty success" source
+is not constructible by design.
+
+**Decision: the body lives in `item.text`.** Not in a content source.
+
+This is also what PR3 already built for: `platform_strings` gives LinkedIn its
+own `post_heading`, so the body renders under a LinkedIn-native heading via
+`item.text`. It is additionally what `_render_log` (`generate.py:716`) and the
+index snippet read.
+
+`kind="li_post"` is therefore used **only for the failure variant** — structured
+evidence that hydration was attempted and could not get a body. That is a real
+use, consistent with the "broken links are demonstrable, not assumed" rule, and
+it leaves `ContentKind`'s `li_post` literal (added in PR1) meaningful.
+
+### What gets written
+
+| Case | Effect on the stub |
+|---|---|
+| **Activity post** | `text` ← `commentary.text.text`; `author` ← `Author(handle, name)`; `media` ← `MediaPhotoPending[]` (images) or `MediaVideoPending` (video); `links` ← hyperlink attributes in the body; `content` ← `Content(fetched_at=now, sources=[])` |
+| **`EXTERNAL_FULL` article** | `links` ← `[Link(actionTarget)]`; `text` ← title + description; `content` ← `Content(fetched_at=now, sources=[])`. The **existing** `fetch` stage then pulls the real page via trafilatura/firecrawl as an `external_article` — no LinkedIn-specific code for the body. |
+| **Unrecognised component** | `text` ← `commentary.text.text` if present; media skipped; logged at WARNING. **Never a failure.** |
+| **Post deleted / inaccessible** | `content` ← `Content(fetched_at=now, sources=[ContentSourceFailure(kind="li_post", url, failure_reason="not_found")])` |
+
+`Content(sources=[])` on success is not a placeholder — it is the bookkeeping
+record: `fetched_at` gives the resume check, the re-enrichment trigger, and an
+"attempted at T" timestamp, for free and with no duplicate rendering.
+
+**Reuse, not reinvention:** `MediaPhotoPending` means `xbrain media` downloads
+LinkedIn images with the existing engine, size cascade, failure classification
+and `_media/` vault mirroring — zero new plumbing. `MediaVideoPending` is
+constructed directly from `VideoPlayMetadata` (**not** via
+`extract.video.build_video_media`, whose input shape is X's
+`video_info.variants` dict).
+
+### Visibility: hydrated ≠ visible
+
+`platforms.is_hydrated` and `generate._has_note` both gate on
+`links or media or enriched` — **not on `text`.** A hydrated text-only post
+with no images and no links stays note-less until `enrich` runs. The real
+pipeline is:
+
+```
+import → hydrate → enrich → topics → generate
+```
+
+This is not worth a core change to `_has_note`; `enrich` runs anyway.
+
+## Resume and idempotency — the central requirement, not a nicety
+
+751 posts at 45–120 s is **~17 hours**, or **31 runs** at the default
+`max_per_run=25` (~34 min each). The hydrator is not a command you run once; it
+is something you run over weeks. Every run must know exactly where it left off
+**from the store alone**, with no side state.
+
+Selection mirrors `fetch._should_refetch`:
+
+- `content is None` → hydrate (never attempted).
+- `--force` → hydrate regardless.
+- A recorded `li_post` failure whose reason is transient (`timeout`,
+  `dns_error`, `unknown_error`) → retry automatically.
+- A terminal failure (`not_found`, `forbidden`) → skip unless `--force`.
+- Otherwise → skip (already hydrated).
+
+Newest-first ordering: recent posts are likelier to still exist.
+
+## Guardrails
+
+1. **Pacing from config, never hardcoded** — `linkedin_min_delay_s` /
+   `linkedin_max_delay_s` / `linkedin_max_per_run` (PR2, validated: delays
+   ≥ 20 s, cap ≤ 100). Random uniform delay between posts.
+2. **Headful only.** No `--headless` flag. A human is meant to be around.
+3. **A logged-out landing stops the run — keeping partial progress.**
+   `is_logged_out` (PR5) covers `/login`, `/authwall`, `/checkpoint/`,
+   `/uas/login`, `/m/login`. The loop stops at the post that hit the wall;
+   posts hydrated before it are persisted (a run spans 31 sessions — a mid-run
+   authwall must not discard ~25 completed posts), then `SessionExpiredError`
+   is raised. The offending post is left untouched, **never recorded as a
+   per-post failure** — marking a live post dead because of an unrelated
+   session problem is the single worst failure mode in this design.
+4. **Auto-snapshot before the first write** (mirrors `refresh-media`,
+   `digest-video`). A snapshot that cannot be taken aborts the run.
+5. **One bad post never aborts the batch** — a navigation error (timeout,
+   closed target) is a transient `li_post` failure on that item and the loop
+   continues; progress is saved in a `finally`, so Ctrl-C keeps what was done.
+   Progress is also checkpointed every 5 posts, and SIGTERM is turned into a
+   `KeyboardInterrupt` for the run, so a killed process loses at most a few posts.
+   Only an explicit 404/410 with no `Update` is a terminal `not_found`; any
+   other page without the post's `Update` is a transient `unknown_error`
+   (retried up to 3 attempts). 429/999 stop the run (post untouched), and 5
+   consecutive misses stop it as "probably blocked" (`ThrottledError`).
+6. **Never persist raw page payloads.** They carry other people's comments,
+   profiles and PII. Parse in memory, keep only the mapped fields.
+
+## Testing
+
+Repo convention: every module gets `tests/test_*.py`.
+
+- `sdui.py`: text (with `<br>` line breaks); author from the post card and NOT
+  the viewer's sidebar (person and company); photos by CDN kind without avatars;
+  a video as poster-era; unknown image kinds flagged; `/safety/go/` unwrapping and
+  mention/hashtag exclusion; identity (a `ugcPost` reactions id is fine, another
+  activity id or no permalink is rejected); a truncated body rejected; a removed
+  post needing BOTH the missing container and the notice (es/en/pt).
+- `hydrate.py`: selection/resume logic (pure, no browser) — transient retried,
+  terminal skipped, `--force` overriding; `max_per_run` respected; a
+  logged-out landing stopping the loop, persisting the posts hydrated before it,
+  leaving the offending post untouched, and re-raising; delays drawn from config
+  bounds.
+
+**Fixtures are synthetic (`tests/linkedin_html.py`), modelled on the *structure* of the
+captures — never copied from `linkedin_data/`,** which holds real
+personal data of third parties (guardrail 6). Note the honest consequence,
+the same caveat `FORK.md` carries for `#39 PR2/PR3`: constructed fixtures are
+not a production guarantee. Unlike that work, the shapes here were read off a
+real capture first.
+
+## Known limits
+
+- **Re-hydrating an already-hydrated item (`--force` / `--item`) is lossy.**
+  Media and links are rebuilt from the page (photo URLs carry per-load tokens, so
+  they cannot be matched to downloaded entries), which drops downloaded-photo and
+  `describe` state; a failed re-hydrate also replaces the success bookkeeping with
+  a failure record. Fine for never-downloaded items; run `media`/`describe` again
+  afterwards. A fix is the deferred follow-up 7.
+- **Unmapped media is not retried.** A post with an unknown image kind or a
+  video without a recognised cover is stored as hydrated (text + known media) and
+  logs a warning; only `--item` brings it back.
+- **Inferred image kinds.** `ads-document-images_*` (document/carousel pages) are
+  mapped as post photos; `image-shrink_*` (link-card thumbnail) is skipped silently.
+  Both come from run logs, not a seen DOM — revisit if a post shows otherwise.
+  Retry a single item with `socialbrain-li hydrate --item li-<id>` (never `--force`,
+  which re-selects everything).
+- **Do not run other commands during a hydrate.** On save the touched items are
+  merged into a freshly reloaded store, so work other commands wrote meanwhile
+  is kept — except an edit to an item *this run touched*, which is replaced
+  wholesale by the run's copy. The window is small, not zero.
+- **`article` URNs (2 of 751)** are not activity ids, so the identity check is
+  skipped for them (no way to verify the page is the requested one).
+- **Not yet validated end-to-end against a real account on the DOM parser** until
+  `socialbrain-li hydrate --limit 5` is run and the 5 items reviewed by hand.
+- **Video posts** get text + the cover only (the stream is a `blob:` URL); fetching
+  the real stream would mean intercepting the player's network requests.
+- Follow-ups not in this PR: external-link shares are never fetched (their
+  `Content` has no sources, so `fetch` skips them), `--force` resets downloaded
+  media to pending, and mention/hashtag ranges become internal linkedin.com links.
+
+## Open questions
+
+1. **Unseen components.** `documentComponent`, `resharedUpdate`, polls. The
+   degrade-to-text fallback covers them safely, but a repost's body may live on
+   the *reshared* update rather than the outer one — worth a targeted recon
+   before assuming text-only is right for those.
+2. **Signed media URLs expire** (`expiresAt` ≈ 2027 in the samples). If
+   `xbrain media` runs long after `hydrate`, a URL may be dead. Options: run
+   `media` promptly after each hydrate batch, or store `expiresAt` and re-hydrate
+   on expiry. Not solved here.
+3. **Video scope.** `MediaVideoPending` makes LinkedIn videos eligible for
+   `download-videos` and, in principle, `digest-video` transcription. Whether to
+   wire that up is deliberately out of scope for PR6.
+4. **`commentary.text.attributes` was empty in all 7 samples.** The
+   link/mention extraction path is therefore designed but unexercised. Treat it
+   as unvalidated until a post with inline links is parsed.
