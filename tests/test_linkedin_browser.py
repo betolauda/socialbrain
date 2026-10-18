@@ -38,3 +38,15 @@ def test_is_logged_out_detects_login_authwall_and_checkpoint(url: str) -> None:
 )
 def test_is_logged_out_false_for_real_content(url: str) -> None:
     assert not is_logged_out(url)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.linkedin.com/posts/loginradius_some-post-activity-7495649402552913920-AbCd",
+        "https://www.linkedin.com/feed/update/urn:li:activity:1/?trk=/login-redirect",
+        "https://www.linkedin.com/in/login-guy/",
+    ],
+)
+def test_is_logged_out_ignores_login_text_outside_the_path_prefix(url: str) -> None:
+    assert not is_logged_out(url)

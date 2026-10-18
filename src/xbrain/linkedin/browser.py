@@ -15,6 +15,7 @@ name only. The LinkedIn session path comes from
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import urlparse
 
 from playwright.sync_api import sync_playwright
 
@@ -23,7 +24,7 @@ from playwright.sync_api import sync_playwright
 LINKEDIN_LOGIN_URL = "https://www.linkedin.com/login"
 _FEED_URL = "https://www.linkedin.com/feed/"
 
-# URL fragments that mean "this navigation did not land on real content".
+# URL path prefixes that mean "this navigation did not land on real content".
 # Unlike X (which only has /login and /i/flow/login), LinkedIn also bounces a
 # suspicious or unauthenticated session to an authwall or a checkpoint
 # challenge (2FA, "is this you?"). The hydrator MUST tell these apart from a
@@ -67,6 +68,13 @@ def is_logged_out(page_url: str) -> bool:
 
     Checked after each navigation in the hydrator: a hit here aborts the
     whole run (the session must be renewed with `socialbrain-li login`),
-    rather than being misread as a per-post failure.
+    rather than being misread as a per-post failure. Only the URL *path* is
+    matched, as a segment prefix: a post slug such as ``/posts/loginradius_...``
+    or a ``?trk=/login`` query must not read as a dead session (it would block
+    the run at the same post forever).
     """
-    return any(marker in page_url for marker in _LOGGED_OUT_MARKERS)
+    path = urlparse(page_url).path
+    return any(
+        path == marker.rstrip("/") or path.startswith(marker.rstrip("/") + "/")
+        for marker in _LOGGED_OUT_MARKERS
+    )
