@@ -89,6 +89,15 @@ def test_unknown_image_kind_is_flagged_not_dropped_silently() -> None:
     assert "image:document-cover_800" in content.warnings
 
 
+def test_playlist_poster_is_the_video_cover() -> None:
+    poster = '<picture class="vjs-poster"><img src="https://dms.licdn.com/playlist/vid/v2/AAAA/pp?e=1&v=beta&t=tok"></picture>'
+    page = post_page(media=[poster, '<video src="blob:https://x/1"></video>'])
+    content = _post(page)
+    assert len(content.media) == 1 and isinstance(content.media[0], MediaVideoPending)
+    assert content.media[0].url == content.media[0].thumbnail_url
+    assert not content.is_unknown_component and content.warnings == []
+
+
 def test_video_without_cover_is_flagged_unknown() -> None:
     content = _post(post_page(media=['<video src="blob:https://x/1"></video>']))
     assert content.is_unknown_component and "video:no-cover" in content.warnings

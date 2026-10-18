@@ -55,6 +55,8 @@ logger = logging.getLogger(__name__)
 
 _ACTIVITY_HREF = re.compile(r"/feed/update/urn:li:activity:(\d+)")
 _IMAGE_KIND = re.compile(r"/dms/image/v\d+/[^/]+/([\w\-]+)/")
+# A <video> poster can also be served from the playlist CDN path, not /dms/image/.
+_PLAYLIST_POSTER = "/playlist/vid/"
 _PROFILE_PATH = re.compile(r"^/(in|company|school)/([^/?#]+)")
 
 # CDN image kinds that are not post content.
@@ -147,7 +149,9 @@ def _media(card: etree._Element) -> tuple[list[MediaEntry], bool, list[str]]:
     for image in card.xpath(".//img[@src]"):
         src = image.get("src")
         match = _IMAGE_KIND.search(src)
-        kind = match.group(1) if match else "?"
+        kind = (
+            match.group(1) if match else ("videocover-playlist" if _PLAYLIST_POSTER in src else "?")
+        )
         if kind.startswith(_AVATAR_KINDS) or src in seen:
             continue
         seen.add(src)
