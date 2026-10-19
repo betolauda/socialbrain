@@ -2,6 +2,8 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 from typer.testing import CliRunner
 
 from xbrain.cli import app
@@ -2687,3 +2689,31 @@ def test_digest_video_frames_talking_head_skips_and_embeds_nothing(tmp_path: Pat
     assert "## Video digest" in note  # the transcript digest still renders
     assert "_media/42/frames" not in note  # but NO slide embed
     assert not (vault / "x-knowledge" / "_media" / "42" / "frames").exists()
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["media", "--items", ""],
+        ["media", "--items", " , ,"],
+        ["describe", "--items", ""],
+        ["download-videos", "--items", "", "--yes"],
+    ],
+)
+def test_items_option_present_but_empty_is_an_error_and_writes_nothing(
+    tmp_path: Path, monkeypatch, argv: list[str]
+):
+    """`--items ""` must NOT fall through to 'every item' (a script whose id
+    list came out empty would otherwise process the whole store)."""
+    _setup_repo(tmp_path, monkeypatch)
+    items_path = tmp_path / "data" / "items.json"
+    save_store({"1": _linked_item("1")}, items_path)
+    before = items_path.read_bytes()
+    snapshots_before = sorted(p.name for p in (tmp_path / "data").iterdir())
+
+    result = runner.invoke(app, argv)
+
+    assert result.exit_code != 0
+    assert "--items" in result.output
+    assert items_path.read_bytes() == before
+    assert sorted(p.name for p in (tmp_path / "data").iterdir()) == snapshots_before
