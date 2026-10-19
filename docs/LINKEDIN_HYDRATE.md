@@ -242,13 +242,15 @@ real capture first.
 
 ## Known limits
 
-- **A video's cover is a remote, signed URL that expires.** A LinkedIn video is stored
-  poster-era (`url == thumbnail_url`) and `media` only downloads photos, so the note
-  embeds the cover from the CDN (`e=` in the URL is its expiry, ~2 weeks after the
-  hydrate). After that the image is broken. Remedy: re-hydrate that item
-  (`socialbrain-li hydrate --item li-<id>`) to get a fresh URL. Making the cover a
-  downloaded photo was considered and not done: it would give up the "this is a video"
-  marker the parser keeps on purpose.
+- **LinkedIn media URLs are signed and expire within ~1–2 weeks** (`e=` is the expiry;
+  measured: ~8 days for a video cover, ~11 for photos, counted from the hydrate). So
+  **run `media` soon after every `hydrate`** — hydrate and media go in pairs. Photos are
+  safe once downloaded; a video, though, is stored poster-era (`url == thumbnail_url`)
+  and `media` only downloads photos, so its note embeds the cover from the CDN and the
+  image breaks when the URL expires. Remedy: `socialbrain-li hydrate --item li-<id>`
+  renews the URL, but only for another 1–2 weeks. A durable fix would download the
+  cover while keeping the "this is a video" marker (a "downloaded thumbnail" state in the
+  model — core, its own decision). Revisit once more videos are hydrated and the volume is known.
 - **Re-hydrating an already-hydrated item (`--force` / `--item`) is lossy.**
   Media and links are rebuilt from the page (photo URLs carry per-load tokens, so
   they cannot be matched to downloaded entries), which drops downloaded-photo and
