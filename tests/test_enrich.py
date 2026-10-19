@@ -17,6 +17,17 @@ def _item(item_id: str) -> Item:
     )
 
 
+def test_unhydrated_linkedin_stubs_are_not_pending_but_empty_bookmarks_and_hydrated_posts_are():
+    stub = _item("li-1")
+    stub.source, stub.text = "li_saved", ""
+    hydrated = _item("li-2")
+    hydrated.source, hydrated.text = "li_saved", "real post text"
+    empty_bookmark = _item("3")
+    empty_bookmark.text = ""  # e.g. a media-only tweet: still worth enriching
+    store = {"li-1": stub, "li-2": hydrated, "3": empty_bookmark}
+    assert {i.id for i in items_pending_enrichment(store)} == {"li-2", "3"}
+
+
 def test_items_pending_returns_unenriched_items():
     store = {"1": _item("1"), "2": _item("2")}
     assert {i.id for i in items_pending_enrichment(store)} == {"1", "2"}

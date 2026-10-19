@@ -53,6 +53,7 @@ actual number here as PRs land:
 | 7 | `media.py`, `fetch.py` | _pending_ |
 | 8 | `dashboard.py` + `resources/dashboard.template.html` | _pending, deliberately last_ |
 | — | `transcribe.py` (+9, public `parse_transcript`), `cli.py` (+37, `import-note`); new `import_note.py` — video2note integration, off the numbered PR track | **~46 net** |
+| — | `generate.py` (+11/-1, poster-only video renders its cover + a "no descargable" note instead of a play link to an image), `enrich.py` (+5, `li_saved` stubs without text are never pending) — LinkedIn follow-ups, off the numbered PR track | **~16 net** |
 
 PR 6 (the LinkedIn hydrator — `sdui.py` + `hydrate.py` and a
 `socialbrain-li hydrate` command) is purely additive: new files under
