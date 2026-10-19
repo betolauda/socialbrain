@@ -14,7 +14,7 @@ destructive auto-snapshot) is the CLI's job.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 # Private on purpose: exposing it would mean editing `digest.py` (core), which the
@@ -67,7 +67,8 @@ def import_note(
     video media at all, raises `ValueError` and nothing is attached (a typo'd id
     that happens to exist must not get a "Video digest"). Items already carrying
     an `x_video` source are skipped unless `force`; a forced replace keeps the
-    prior source's `frames` (slides from `digest-video --frames`).
+    prior source's `frames` (slides from `digest-video --frames`). A transcript without
+    speech is attached without its title (see below).
     """
     unknown = [item_id for item_id in item_ids if item_id not in store]
     if unknown:
@@ -86,6 +87,10 @@ def import_note(
         for item_id in report.attached
         if (prior := _prior_x_video(store[item_id])) is not None and prior.frames
     }
+    if not transcript.has_speech:
+        # video2note titles a silent video with a generic placeholder; as the note
+        # title it would hide the tweet's own text, so a silent source carries none.
+        transcript = replace(transcript, title=None)
     attach_transcript(store, report.attached, transcript, frames_by_item=frames_by_item)
     return report
 
