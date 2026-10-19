@@ -268,3 +268,25 @@ def test_import_note_all_skipped_says_nothing_written_and_hints_force(tmp_path: 
     assert "--force" in result.output
     assert "no se escribió nada" in result.output
     assert "Snapshot created" not in result.output
+
+
+def test_import_note_drops_the_title_of_a_silent_transcript(tmp_path: Path, monkeypatch):
+    """video2note titles a no-speech video with a generic placeholder; as the note title it
+    would hide the tweet's own text. A spoken transcript keeps its title."""
+    items_path = _setup_repo(tmp_path, monkeypatch)
+    save_store({"1": _item("1"), "2": _item("2")}, items_path)
+    silent = _write_transcript(
+        tmp_path / "silent.json",
+        text="",
+        segments=[],
+        has_speech=False,
+        title="Video sin transcripcion ni texto en pantalla",
+    )
+    spoken = _write_transcript(tmp_path / "spoken.json", title="Charla")
+
+    assert runner.invoke(app, ["import-note", str(silent), "--item", "1"]).exit_code == 0
+    assert runner.invoke(app, ["import-note", str(spoken), "--item", "2"]).exit_code == 0
+
+    store = load_store(items_path)
+    assert store["1"].content.sources[0].title is None
+    assert store["2"].content.sources[0].title == "Charla"
