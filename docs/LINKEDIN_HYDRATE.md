@@ -242,6 +242,13 @@ real capture first.
 
 ## Known limits
 
+- **A video's cover is a remote, signed URL that expires.** A LinkedIn video is stored
+  poster-era (`url == thumbnail_url`) and `media` only downloads photos, so the note
+  embeds the cover from the CDN (`e=` in the URL is its expiry, ~2 weeks after the
+  hydrate). After that the image is broken. Remedy: re-hydrate that item
+  (`socialbrain-li hydrate --item li-<id>`) to get a fresh URL. Making the cover a
+  downloaded photo was considered and not done: it would give up the "this is a video"
+  marker the parser keeps on purpose.
 - **Re-hydrating an already-hydrated item (`--force` / `--item`) is lossy.**
   Media and links are rebuilt from the page (photo URLs carry per-load tokens, so
   they cannot be matched to downloaded entries), which drops downloaded-photo and
