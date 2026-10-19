@@ -47,9 +47,14 @@ def items_pending_enrichment(
     An item is pending when it has no enrichment yet, OR when its content was
     (re)fetched after its last enrichment (`_needs_reenrichment` — the #44
     re-enrichment trigger for a transcript attached post-enrich).
+
+    An un-hydrated `li_saved` stub (no text yet) is never pending: there is
+    nothing to summarise, and enriching it would spend an LLM call on an empty post.
     """
     pending: list[Item] = []
     for item in store.values():
+        if item.source == "li_saved" and not item.text.strip():
+            continue
         if item.enriched is not None and not _needs_reenrichment(item):
             continue
         if since and item.created_at < since:

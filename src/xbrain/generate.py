@@ -282,6 +282,8 @@ def _render_media_lines(item: Item) -> list[str]:
       stream (the mp4/HLS URL from `video_info.variants`, not the poster),
       flagged as pending local download until `xbrain download-videos`
       fetches the bytes (mp4) — HLS stays a link pending the ffmpeg follow-up.
+      A poster-era entry (`url == thumbnail_url`, LinkedIn) has no stream: it
+      renders the cover as an image plus a "no descargable" note.
 
     The output is intentionally plain markdown; the caller (`_render_note`)
     wraps it in a blank line on either side for readability.
@@ -310,7 +312,15 @@ def _render_media_lines(item: Item) -> list[str]:
         elif isinstance(entry, MediaVideoPending):
             # `entry.url` is the playable stream (mp4 or HLS), not the poster,
             # so surface it as a clickable link; bytes are not saved yet.
-            lines.append(f"> 🎥 [Ver vídeo]({entry.url}) (pendiente de descarga)")
+            if entry.url == entry.thumbnail_url:
+                # Poster-era (e.g. LinkedIn): the URL is the cover image, there is
+                # no stream to link to — show the cover, say it can't be played here.
+                lines.append(f"![]({entry.url})")
+                lines.append(
+                    "> 🎥 Vídeo no descargable (solo la portada); ábrelo en el post original"
+                )
+            else:
+                lines.append(f"> 🎥 [Ver vídeo]({entry.url}) (pendiente de descarga)")
         else:
             assert_never(entry)
     return lines

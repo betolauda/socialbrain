@@ -149,6 +149,22 @@ def test_generate_renders_video_pending_as_clickable_play_link(tmp_path: Path):
     assert "pendiente de descarga" in body
 
 
+def test_generate_renders_a_poster_only_video_as_its_cover_not_as_a_play_link(tmp_path: Path):
+    """Poster-era video (`url == thumbnail_url`, e.g. LinkedIn): the URL is an image, so a
+    "Ver vídeo" link would open a picture. Show the cover and say it is not downloadable."""
+    from xbrain.models import MediaVideoPending
+
+    cover = "https://dms.licdn.com/playlist/vid/v2/AAAA/thumb?e=1&t=tok"
+    item = _item("1", with_link=True)
+    item.media = [MediaVideoPending(url=cover, thumbnail_url=cover)]
+
+    generate({"1": item}, tmp_path)
+    body = next((tmp_path / "items").glob("*.md")).read_text(encoding="utf-8")
+    assert f"![]({cover})" in body
+    assert "Ver vídeo" not in body
+    assert "no descargable" in body
+
+
 def test_generate_renders_downloaded_video_as_obsidian_embed(tmp_path: Path):
     """A `MediaVideoDownloaded` becomes a `![[_media/<id>/<n>.mp4]]` embed and the
     mp4 bytes are mirrored into the vault's `_media/` tree (self-contained vault),
