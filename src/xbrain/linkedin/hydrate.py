@@ -302,8 +302,9 @@ def _hydrate_one(
 ) -> Literal["hydrated", "gone", "miss"]:
     """Apply one fetched page's HTML onto a stub: ``hydrated``, ``gone`` or ``miss``.
 
-    ``gone`` is a removed post: an understood answer, so it is not evidence that
-    LinkedIn is blocking us (unlike a ``miss``).
+    ``gone`` is an understood answer that is terminal for the post — a removed
+    post, or a page that is another post (``identity:mismatch``) — so it is not
+    evidence that LinkedIn is blocking us (unlike a ``miss``).
 
     A page that is not the requested post is never written onto the stub: a removed
     post (container absent AND the notice present) is the terminal ``not_found``;
@@ -318,6 +319,13 @@ def _hydrate_one(
     diagnostics = _describe_miss(item, page_html, landed_url, outcome.reason)
     if outcome.kind == "deleted":
         _record_failure(item, "not_found", now, error=diagnostics, http_status=status)
+        return "gone"
+    if (outcome.reason or "").startswith("identity:mismatch"):
+        # Served fine, but the page holds another post's permalink (a reshare):
+        # deterministic, so retrying or counting it towards the blocked-breaker
+        # only stalls the queue. `empty_content` is terminal (not in
+        # `_TRANSIENT_LI_FAILURES`); the diagnostics keep the real reason.
+        _record_failure(item, "empty_content", now, error=diagnostics, http_status=status)
         return "gone"
     _record_parse_miss(item, now, status, diagnostics)
     return "miss"

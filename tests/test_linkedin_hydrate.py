@@ -19,6 +19,7 @@ from tests.linkedin_html import deleted_page, post_page
 from xbrain.config import load_config
 from xbrain.linkedin import hydrate as hydrate_mod
 from xbrain.linkedin.hydrate import (
+    _TRANSIENT_LI_FAILURES,
     HydrateReport,
     SessionExpiredError,
     ThrottledError,
@@ -860,3 +861,42 @@ def test_item_ids_beyond_the_run_cap_are_reported_not_dropped_silently(
 
     assert report.selected == 2
     assert "1 omitidos" in capsys.readouterr().out
+
+
+def _mismatch_page(wanted: str) -> str:
+    # Served fine (container present) but it is another post's permalink: a reshare.
+    return _page_html(digits="999" + wanted, body="someone else's post")
+
+
+def test_identity_mismatch_is_terminal_and_not_retried(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    save_store({"li-1": _stub("1")}, cfg.items_path)
+    url = "https://www.linkedin.com/feed/update/urn:li:activity:1"
+    page = _FakePage({url: _mismatch_page("1")})
+
+    hydrate(
+        cfg, now=_now, context_factory=_factory(page), sleep=lambda _s: None, rng=random.Random(0)
+    )
+
+    failure = load_store(cfg.items_path)["li-1"].content.sources[0]
+    assert "identity:mismatch" in (failure.error or "")
+    assert failure.failure_reason not in _TRANSIENT_LI_FAILURES
+    assert items_needing_hydration(load_store(cfg.items_path), force=False) == []
+
+
+def test_identity_mismatches_do_not_trip_the_blocked_breaker(tmp_path: Path) -> None:
+    """A served-but-not-this-post page is an understood answer, not evidence of a block:
+    five of them in a row must not stop the run before the good post behind them."""
+    cfg = _cfg(tmp_path, max_per_run=10)
+    save_store({f"li-{n}": _stub(str(n), age_days=n) for n in range(1, 8)}, cfg.items_path)
+    urls = {n: f"https://www.linkedin.com/feed/update/urn:li:activity:{n}" for n in range(1, 8)}
+    htmls = {urls[n]: _mismatch_page(str(n)) for n in range(1, 7)}
+    htmls[urls[7]] = _page_html(digits="7", body="seven")
+    page = _FakePage(htmls)
+
+    hydrate(
+        cfg, now=_now, context_factory=_factory(page), sleep=lambda _s: None, rng=random.Random(0)
+    )
+
+    assert len(page.goto_urls) == 7
+    assert load_store(cfg.items_path)["li-7"].text == "seven"
