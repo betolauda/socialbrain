@@ -50,7 +50,8 @@ actual number here as PRs land:
 | 4 | none — all new files under `src/xbrain/linkedin/` (saved-items importer + `socialbrain-li` CLI); `pyproject.toml` console script only | **0** |
 | 5 | none — `src/xbrain/linkedin/browser.py` (LinkedIn `login` + `is_logged_out`) + a `socialbrain-li login` command; reuses `extract.browser.x_context` as-is | **0** |
 | 6 | none — all new files under `src/xbrain/linkedin/` (`sdui` DOM parser + `hydrate`); `socialbrain-li hydrate` command; `.gitignore` only (not source) | **0** |
-| 7 | `media.py`, `fetch.py` | _pending_ |
+| 7a | `media.py` (+3/-2, empty id list selects nothing), `cli.py` (+14/-3, `_parse_items_option`: `--items ""` is an error on `media`/`describe`/`download-videos`) — guard against an empty id list widening to the whole store | **~22 net** |
+| 7 | `media.py`, `fetch.py` (rest) | _pending_ |
 | 8 | `dashboard.py` + `resources/dashboard.template.html` | _pending, deliberately last_ |
 | — | `transcribe.py` (+9, public `parse_transcript`), `cli.py` (+37, `import-note`); new `import_note.py` — video2note integration, off the numbered PR track | **~46 net** |
 | — | `generate.py` (+11/-1, poster-only video renders its cover + a "no descargable" note instead of a play link to an image), `enrich.py` (+5, `li_saved` stubs without text are never pending) — LinkedIn follow-ups, off the numbered PR track | **~16 net** |

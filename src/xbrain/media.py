@@ -337,9 +337,10 @@ def _filter_by_ids(items: dict[str, Item], items_filter: list[str] | None) -> di
 
     Pulled out of `download_all` so the orchestrator does not interleave
     the filter check inside the per-photo loop. An empty / missing
-    `items_filter` is a no-op (returns the same dict).
+    `items_filter` (None) is a no-op (returns the same dict); an empty list
+    selects nothing — it must never widen to the whole store.
     """
-    if not items_filter:
+    if items_filter is None:
         return items
     wanted = set(items_filter)
     return {item_id: item for item_id, item in items.items() if item_id in wanted}

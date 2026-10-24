@@ -1437,3 +1437,11 @@ def test_emit_summary_line_non_silent_when_only_article_skips(capsys):
     report = MediaReport(article_images_skipped=2)
     emit_summary_line(report)
     assert "SUMMARY: " in capsys.readouterr().err
+
+
+def test_filter_by_ids_empty_list_selects_nothing_not_everything():
+    from xbrain.media import _filter_by_ids
+
+    items: dict = {"1": object()}
+    assert _filter_by_ids(items, []) == {}
+    assert _filter_by_ids(items, None) is items

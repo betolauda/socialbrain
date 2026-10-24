@@ -586,7 +586,7 @@ def media(
     — la opción `--force` NO los descarga.
     """
     cfg = _config()
-    items_filter = [s.strip() for s in items.split(",") if s.strip()] if items else None
+    items_filter = _parse_items_option(items)
     _run_media(cfg, force=force, limit=limit, items_filter=items_filter, verbose=verbose)
 
 
@@ -743,7 +743,7 @@ def describe(
     en las llamadas LLM subsiguientes.
     """
     cfg = _config()
-    items_filter = [s.strip() for s in items.split(",") if s.strip()] if items else None
+    items_filter = _parse_items_option(items)
     worksheet_path = cfg.data_dir / "describe-worksheet.json"
     if apply is not None:
         _auto_snapshot(cfg, "describe-apply")
@@ -783,6 +783,20 @@ def describe(
         batch_size=batch_size,
         verbose=verbose,
     )
+
+
+def _parse_items_option(items: str | None) -> list[str] | None:
+    """Parse `--items`: absent -> None (whole store); present but empty -> error.
+
+    `--items ""` must not fall through to "every item": a script whose id list
+    came out empty would otherwise process the whole store.
+    """
+    if items is None:
+        return None
+    ids = [s.strip() for s in items.split(",") if s.strip()]
+    if not ids:
+        raise typer.BadParameter("--items está vacío: pasa al menos un id o quita la opción.")
+    return ids
 
 
 def _warn_items_filter_no_match(cfg: Config, items_filter: list[str]) -> None:
@@ -943,7 +957,7 @@ def download_videos(
     Es destructivo (reescribe `items.json`) → auto-snapshot antes de escribir.
     """
     cfg = _config()
-    items_filter = [s.strip() for s in items.split(",") if s.strip()] if items else None
+    items_filter = _parse_items_option(items)
     max_size_bytes = parse_size_to_bytes(max_size) if max_size else None
     _run_download_videos(
         cfg,
