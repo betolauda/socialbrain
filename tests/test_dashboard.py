@@ -1,7 +1,11 @@
 # tests/test_dashboard.py
 import json
+import re
+import shutil
+import subprocess
 from datetime import datetime, timezone
 
+import pytest
 from PIL import Image
 
 from xbrain.dashboard import (
@@ -368,3 +372,37 @@ def test_generate_writes_dashboard_with_valid_blob_and_links_it(tmp_path):
     data = json.loads(blob)
     assert data["meta"]["total"] == 2
     assert data["meta"]["bookmarks"] == 1 and data["meta"]["own"] == 1
+
+
+def _topics_subtitle_js() -> str:
+    """The template's JS statement that fills the topics-panel subtitle."""
+    html = render_dashboard_html({}, echarts="")
+    lines = [ln for ln in html.splitlines() if "getElementById('topics-sub')" in ln]
+    assert len(lines) == 1
+    return lines[0]
+
+
+def test_topics_subtitle_is_computed_not_hardcoded():
+    html = render_dashboard_html({}, echarts="")
+    assert re.search(r'<div class="sub" id="topics-sub">[^<]*</div>', html)
+    assert not re.search(r'class="sub"[^>]*>\s*\d+ topics', html)
+    assert "DATA.topics_sorted.length" in _topics_subtitle_js()
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_topics_subtitle_reflects_real_topic_count():
+    items = [_item(str(100 + i), topic=f"topic-{i % 7}") for i in range(20)]
+    data = compute_dashboard_data(items, {}, {}, [], "JUN 1, 2026")
+    assert len(data["topics_sorted"]) == 7
+    script = (
+        "const el={textContent:''};"
+        "const document={getElementById:id=>id==='topics-sub'?el:null};"
+        "const nf=n=>n.toLocaleString('en-US');"
+        f"const DATA={json.dumps(data)};"
+        f"{_topics_subtitle_js()}"
+        "process.stdout.write(el.textContent);"
+    )
+    out = subprocess.run(  # noqa: S603 — fixed argv, test-only
+        ["node", "-e", script], capture_output=True, text=True, check=True
+    ).stdout
+    assert out == "7 topics · one post counted once"
