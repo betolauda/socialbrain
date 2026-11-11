@@ -179,7 +179,7 @@ footer{margin-top:40px;padding-top:22px;border-top:1px solid var(--hairline);
     </div>
 
     <div class="panel span2">
-      <div class="phead"><div><span class="kick">04 · Themes</span><h3>Topics by primary theme</h3></div><div class="sub">45 topics · one post counted once</div></div>
+      <div class="phead"><div><span class="kick">04 · Themes</span><h3>Topics by primary theme</h3></div><div class="sub" id="topics-sub">one post counted once</div></div>
       <div class="controls">
         <div class="seg" id="seg-top">
           <button data-n="12" class="on">Top 12</button>
@@ -329,6 +329,7 @@ function renderTopics(){
     itemStyle:{color:topicColor(rows.length-1-i,rows.length),borderRadius:[0,4,4,0]}})),barWidth:'62%',
     label:{show:true,position:'right',color:C.faint,fontFamily:MONO,fontSize:11,formatter:p=>nf(p.value)}}]},true);
 }
+document.getElementById('topics-sub').textContent=nf(DATA.topics_sorted.length)+' topics · one post counted once';
 renderTopics();
 topicsChart.on('click',p=>{ if(p.data&&p.data.slug) openTopic(p.data.slug); });
 document.querySelectorAll('#seg-top button').forEach(b=>b.onclick=()=>{
